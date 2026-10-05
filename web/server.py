@@ -141,6 +141,7 @@ def create_app(store: Store = None) -> FastAPI:
         description="Plateforme de veille en temps réel : chat ancré sur scraping, médical B2B & trading",
         version="3.0.0",
     )
+    is_prod = os.getenv("PYTHON_ENV", "development").strip().lower() == "production"
     # Le web a sa propre connexion (WAL) ; l'orchestrateur en aura une autre.
     app.state.store = store or Store()
     app.include_router(create_router(app.state.store))
