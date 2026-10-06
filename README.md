@@ -91,6 +91,8 @@ Deux modèles `Offer` coexistent : `models.py` pour les collectes, `bot/models.p
 
 La version de référence est le français, dans ce README et dans [docs/guide.md](docs/guide.md). Les autres langues vivent dans `docs/i18n/<code>/`, un fichier par langue. La liste et la règle anti-conflit sont dans [docs/i18n/LISEZMOI.md](docs/i18n/LISEZMOI.md).
 
+- English: [docs/i18n/en/README.md](docs/i18n/en/README.md)
+
 ## Licence
 
 [MIT](LICENSE) © 2026 Aris Pacco.
