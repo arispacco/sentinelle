@@ -1,7 +1,11 @@
 """Tests de robustesse pour /api/chat : fallbacks, absence de clé LLM, erreurs de scraping."""
 from __future__ import annotations
 
+import os
 import unittest
+
+os.environ["SENTINELLE_DISABLE_SCHEDULER"] = "1"
+
 from fastapi.testclient import TestClient
 
 from bot.store import Store

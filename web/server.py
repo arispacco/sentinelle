@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -135,13 +136,36 @@ async def periodic_scraping_task(store: Store):
         await asyncio.sleep(1800)
 
 
+def background_scraping_enabled() -> bool:
+    """La veille réseau reste active, sauf si SENTINELLE_DISABLE_SCHEDULER vaut 1."""
+    flag = os.getenv("SENTINELLE_DISABLE_SCHEDULER", "").strip().lower()
+    return flag not in {"1", "true", "yes", "on"}
+
+
 def create_app(store: Store = None) -> FastAPI:
+    is_prod = os.getenv("PYTHON_ENV", "development").strip().lower() == "production"
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        mode = "PRODUCTION" if is_prod else "DEVELOPMENT"
+        log.info("Sentinelle v3.0 démarré en mode %s", mode)
+        task = None
+        if background_scraping_enabled():
+            task = asyncio.create_task(periodic_scraping_task(app.state.store))
+        else:
+            log.info("Veille de fond désactivée (SENTINELLE_DISABLE_SCHEDULER)")
+        yield
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
     app = FastAPI(
         title="Sentinelle — Veille & Recherche Intelligente",
         description="Plateforme de veille en temps réel : chat ancré sur scraping, médical B2B & trading",
         version="3.0.0",
+        lifespan=lifespan,
     )
-    is_prod = os.getenv("PYTHON_ENV", "development").strip().lower() == "production"
     # Le web a sa propre connexion (WAL) ; l'orchestrateur en aura une autre.
     app.state.store = store or Store()
     app.include_router(create_router(app.state.store))
@@ -167,12 +191,6 @@ def create_app(store: Store = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    @app.on_event("startup")
-    async def startup_event():
-        mode = "PRODUCTION" if is_prod else "DEVELOPMENT"
-        log.info("Sentinelle v3.0 démarré en mode %s", mode)
-        asyncio.create_task(periodic_scraping_task(app.state.store))
 
     @app.get("/health")
     @app.head("/health")
