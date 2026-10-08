@@ -9,6 +9,7 @@ from unittest import mock
 
 os.environ["MEDICAL_AUTH_OPTIONAL"] = "1"
 os.environ["MEDICAL_AUTH_SECRET"] = "test-secret"
+os.environ["SENTINELLE_DISABLE_SCHEDULER"] = "1"
 
 
 class TestUserProfile(unittest.TestCase):

@@ -29,5 +29,5 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-# Run with Gunicorn + Uvicorn worker (1 worker approprié pour le plan Render gratuit)
-CMD ["gunicorn", "web.server:app", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--workers", "1", "--timeout", "120", "--access-logfile", "-"]
+# sh -c : la forme exec n'expand pas $PORT. Repli 8000 en local, PORT injecté par Render.
+CMD ["sh", "-c", "exec gunicorn web.server:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --workers 1 --timeout 120 --access-logfile -"]

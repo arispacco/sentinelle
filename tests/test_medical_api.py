@@ -7,6 +7,7 @@ from unittest import mock
 # Forcer auth optionnelle + secret stable avant imports app
 os.environ["MEDICAL_AUTH_OPTIONAL"] = "1"
 os.environ["MEDICAL_AUTH_SECRET"] = "test-secret"
+os.environ["SENTINELLE_DISABLE_SCHEDULER"] = "1"
 
 
 class TestAuth(unittest.TestCase):
