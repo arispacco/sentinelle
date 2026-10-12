@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 import requests
 
 from bot.config import ENV_PATH
+from models import strip_cdata
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ def call_gemini(prompt: str, json_mode: bool = False) -> Optional[str]:
     if not key:
         return None
 
-    primary = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    fallback_candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"]
+    primary = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    fallback_candidates = ["gemini-flash-latest", "gemini-flash-lite-latest"]
     seen = set()
     models = []
     for m in [primary] + fallback_candidates:
@@ -115,6 +116,60 @@ def call_llm(prompt: str, json_mode: bool = False) -> Optional[str]:
     return None
 
 
+_GENERIC_NEWS_MARKERS = (
+    "quoi de neuf", "quoi de nouveau", "les news", "les actu", "les actus",
+    "actualités", "actualites", "aujourd'hui", "cette semaine", "panorama",
+    "digest", "résumé du jour", "resume du jour", "dernières nouvelles",
+    "dernieres nouvelles", "top actu", "à la une", "a la une",
+)
+_SPECIFIC_NEWS_MARKERS = (
+    "parle-moi", "parle moi", "c'est quoi", "cest quoi", "explique",
+    "modèle", "modele", "model", "qui est", "comment fonctionne",
+    "détaille", "detaille", "fais-moi un résumé de", "resume de",
+)
+
+
+def infer_specificity(message: str, intent: str = "search_news", category: str = None, query: str = "") -> str:
+    """Déduit specific|generic pour search_news (heuristique déterministe)."""
+    if intent != "search_news":
+        return "generic"
+    low = (message or "").lower().strip()
+    if any(m in low for m in _GENERIC_NEWS_MARKERS):
+        return "generic"
+    if any(m in low for m in _SPECIFIC_NEWS_MARKERS):
+        return "specific"
+    # Catégorie seule / requête très courte → panorama
+    q = (query or "").strip().lower()
+    cat_aliases = {
+        "top", "tech", "sport", "finance", "politic", "politique", "economie",
+        "économie", "afrique", "international", "ia", "ai", "actu", "news",
+    }
+    if category and (not q or q in cat_aliases or q == str(category).lower()):
+        return "generic"
+    if len(low.split()) <= 4 and category:
+        return "generic"
+    # Question avec sujet nommé distinct → spécifique
+    if len(low.split()) >= 5 or (q and len(q.split()) >= 2 and q not in cat_aliases):
+        return "specific"
+    return "generic"
+
+
+def _normalize_intent_result(data: dict, message: str) -> dict:
+    """Garantit specificity cohérente sur la sortie LLM ou heuristique."""
+    intent = data.get("intent") or "chat"
+    category = data.get("category")
+    query = data.get("query") or ""
+    raw_spec = (data.get("specificity") or "").strip().lower()
+    if intent == "search_news":
+        if raw_spec in ("specific", "generic"):
+            data["specificity"] = raw_spec
+        else:
+            data["specificity"] = infer_specificity(message, intent, category, query)
+    else:
+        data["specificity"] = None
+    return data
+
+
 def parse_user_intent(message: str) -> dict:
     """Analyse la requête pour en extraire l'intention et les mots-clés."""
     key = get_gemini_key()
@@ -138,7 +193,10 @@ def parse_user_intent(message: str) -> dict:
             * "create_watch" (si l'utilisateur veut suivre une entreprise, un conflit, un événement dans le temps / dashboard)
             * "chat" (salutations uniquement, sans recherche)
         - "query" : requête nettoyée (pour create_watch : nom de l'entité ou du sujet)
-        - "category" : si search_news : top|tech|sport|finance|politic|economie|ia sinon null
+        - "category" : si search_news : top|tech|sport|finance|politic|economie|afrique|international|ia sinon null
+        - "specificity" : "specific" si la question vise UN sujet précis (ex. un modèle, une entreprise, un événement nommé) ;
+          "generic" si c'est un panorama / digeste large (ex. « les news sur l'IA », « quoi de neuf aujourd'hui ») ;
+          null si intent ≠ search_news
         - "reply" : courte phrase de transition en français
         """
         res = call_llm(prompt, json_mode=True)
@@ -146,7 +204,7 @@ def parse_user_intent(message: str) -> dict:
             try:
                 data = json.loads(res)
                 if "intent" in data:
-                    return data
+                    return _normalize_intent_result(data, message)
             except Exception:
                 log.warning("[AI] Échec parsing JSON Gemini : %s", res)
 
@@ -157,108 +215,115 @@ def parse_user_intent(message: str) -> dict:
         for word in ["je", "veux", "voudrais", "aimerais", "suis", "suivre", "le", "la", "les", "l'", "suivi", "de", "du", "des", "évolution", "evolution", "actu", "actualité"]:
             query = re.sub(rf"\b{word}\b", " ", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "create_watch",
             "query": query or message.strip(),
             "category": None,
             "reply": f"Je crée / mets à jour un tableau de suivi pour « {query or message.strip()} »...",
-        }
+        }, message)
 
     if any(x in low for x in ["crypto", "bitcoin", "btc", "ethereum", "eth", "coingecko", "token", "blockchain"]):
         query = re.sub(r"\b(cherche|trouve|crypto|prix|cours|de|du|des|le|la|les)\b", " ", message, flags=re.I)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_crypto",
             "query": query or "bitcoin",
             "category": None,
             "reply": f"Je consulte les marchés et actus crypto pour '{query or 'bitcoin'}'...",
-        }
+        }, message)
 
     if any(x in low for x in ["polymarket", "prédiction", "prediction", "probabilité", "probabilite", "pari", "odds", "marché de prédiction"]):
         query = re.sub(r"\b(cherche|trouve|polymarket|prédiction|prediction|probabilité|sur|de|du|des)\b", " ", message, flags=re.I)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_predictions",
             "query": query or "election",
             "category": None,
             "reply": f"Je récupère les probabilités Polymarket pour '{query or 'election'}'...",
-        }
+        }, message)
 
     if any(x in low for x in ["guerre", "conflit", "géopolit", "geopolit", "sanctions", "ukraine", "gaza", "otan", "taiwan", "sahel"]):
         query = message
         for word in ["cherche", "trouve", "actu", "actualite", "sur", "le", "la", "les", "de"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_geopolitics",
             "query": query or "conflit",
             "category": None,
             "reply": f"Je rassemble des sources géopolitiques sur '{query or 'conflit'}'...",
-        }
+        }, message)
 
     if any(x in low for x in ["medecin", "medical", "essai", "clinique", "pathologie", "traitement", "paludisme", "malaria", "drepanocytose", "sickle cell", "hiv", "vih", "tuberculose", "tuberculosis", "cancer", "sante", "santé", "pubmed"]):
         query = message
         for word in ["cherche", "trouve", "trouver", "les", "des", "essais", "cliniques", "clinique", "sur", "le", "la", "l'", "pour", "contre"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_medical",
             "query": query or "malaria",
             "category": None,
             "reply": f"Je recherche des études cliniques et publications sur '{query or 'malaria'}'..."
-        }
+        }, message)
 
     if any(x in low for x in ["bourse", "bourses", "scholarship", "fellowship", "grant study"]):
         query = message
         for word in ["cherche", "trouve", "trouver", "des", "les", "bourses", "bourse", "scholarship", "scholarships", "de", "pour", "en"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_scholarships",
             "query": query or "scholarship",
             "category": None,
             "reply": f"Je cherche des bourses / scholarships pour « {query or 'études'} »...",
-        }
+        }, message)
 
     if any(x in low for x in ["voyage", "travel grant", "mobilité", "mobilite", "visa opportunity", "échange", "echange"]):
         query = message
         for word in ["cherche", "trouve", "trouver", "des", "les", "voyages", "voyage", "opportunités", "opportunites", "de", "pour", "en"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_travel",
             "query": query or "mobilité",
             "category": None,
             "reply": f"Je cherche des opportunités de voyage / mobilité pour « {query or 'mobilité'} »...",
-        }
+        }, message)
 
     if any(x in low for x in ["événement", "evenement", "events", "event", "conférence", "conference", "meetup", "hackathon"]):
         query = message
         for word in ["cherche", "trouve", "trouver", "des", "les", "événements", "evenements", "événement", "evenement", "events", "event", "de", "pour", "en"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_events",
             "query": query or "tech",
             "category": None,
             "reply": f"Je cherche des événements pour « {query or 'tech'} »...",
-        }
+        }, message)
 
     if any(x in low for x in ["job", "emploi", "recrute", "travail", "stage", "alternance", "position", "career", "poste", "developer"]):
         query = message
         for word in ["cherche", "trouve", "trouver", "des", "jobs", "job", "offres", "offre", "d'emploi", "emploi", "de", "pour", "en"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_jobs",
             "query": query or "developer",
             "category": None,
             "reply": f"Je recherche des offres d'emploi pour '{query or 'developer'}'..."
-        }
+        }, message)
 
     if any(x in low for x in ["actu", "news", "nouvelle", "actualite", "actualité", "sport", "tech", "finance", "politique", "economie", "économie", "ia"]):
         category = "top"
-        if "tech" in low:
+        # IA avant tech (sinon « news IA » tombe en tech)
+        if "ia" in low or "intelligence artificielle" in low or re.search(r"\bai\b", low):
+            category = "ia"
+        elif "afrique" in low or "africain" in low or "sahel" in low:
+            category = "afrique"
+        elif "internation" in low or "monde" in low:
+            category = "international"
+        elif "tech" in low:
             category = "tech"
         elif "sport" in low:
             category = "sport"
@@ -268,46 +333,44 @@ def parse_user_intent(message: str) -> dict:
             category = "politic"
         elif "econo" in low:
             category = "economie"
-        elif "ia" in low or "intelligence" in low or "ai" in low:
-            category = "ia"
         query = message
         for word in ["actu", "actus", "news", "nouvelles", "actualites", "actualité", "sur", "l'", "la", "le", "les"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_news",
             "query": query or category,
             "category": category,
             "reply": f"Je consulte les actualités '{category}'..."
-        }
+        }, message)
 
     if any(x in low for x in ["promo", "reduction", "free", "gratuit", "discount", "credits", "offre"]):
         query = message
         for word in ["cherche", "trouve", "promos", "promo", "gratuit", "free", "credits", "offres"]:
             query = re.sub(rf"\b{word}\b", "", query, flags=re.IGNORECASE)
         query = " ".join(query.split())
-        return {
+        return _normalize_intent_result({
             "intent": "search_offers",
             "query": query or "AI",
             "category": None,
             "reply": f"Je recherche des promotions liées à '{query or 'AI'}'..."
-        }
+        }, message)
 
     # Recherche générique -> news scrape
     if len(message.strip()) > 12 and not any(x in low for x in ["bonjour", "salut", "hello", "merci", "hey"]):
-        return {
+        return _normalize_intent_result({
             "intent": "search_news",
             "query": message.strip(),
             "category": None,
             "reply": f"Je lance une recherche sourcée sur « {message.strip()[:60]} »...",
-        }
+        }, message)
 
-    return {
+    return _normalize_intent_result({
         "intent": "chat",
         "query": "",
         "category": None,
         "reply": "Bonjour. Pose une question : j'irai scraper des sources et je répondrai uniquement à partir d'elles."
-    }
+    }, message)
 
 
 def generate_summary(title: str, text: str) -> str:
@@ -328,50 +391,100 @@ def generate_summary(title: str, text: str) -> str:
     return text
 
 
-def synthesize_digest(user_message: str, offers: list) -> str:
-    """Synthèse ancrée STRICTEMENT sur les items scrapés (pas de connaissances hors sources)."""
-    if not offers:
-        return ""
-
-    data_str = json.dumps([
-        {
-            "title": getattr(o, "title", ""),
+def _build_numbered_sources(offers: list, max_items: int = 8) -> tuple:
+    """Numérote les items [1..N] pour les citations inline du digest."""
+    numbered = []
+    for i, o in enumerate(offers[:max_items], start=1):
+        numbered.append({
+            "n": i,
+            "title": strip_cdata(getattr(o, "title", "")),
             "description": getattr(o, "description", ""),
             "provider": getattr(o, "provider", ""),
             "url": getattr(o, "url", ""),
             "type": getattr(o, "offer_type", ""),
-        } for o in offers[:20]
-    ], ensure_ascii=False)
+        })
+    return numbered
+
+
+def synthesize_digest(user_message: str, offers: list, specificity: str = "generic") -> str:
+    """Synthèse ancrée STRICTEMENT sur les items scrapés (pas de connaissances hors sources).
+
+    Structure type Perplexity : phrase d'accroche directe, points clés avec
+    citations inline [n], puis contexte final. Markdown en sortie.
+
+    specificity=specific → réponse strictement centrée sur la question (pas de panorama).
+    specificity=generic → multi-sujets autorisé.
+    """
+    if not offers:
+        return ""
+
+    is_specific = (specificity or "generic").lower() == "specific"
+    data_str = json.dumps(_build_numbered_sources(offers), ensure_ascii=False)
+
+    if is_specific:
+        mode_rules = """5. MODE SPÉCIFIQUE — OBLIGATOIRE :
+   - Réponds UNIQUEMENT à la question posée. Refuse toute digression.
+   - Interdiction de dérouler un panorama ou une liste d'actus connexes (autres entreprises, autres modèles, « aussi dans l'actu »…).
+   - Un vrai résumé complet et ciblé sur le sujet demandé, même si plusieurs sources traitent d'angles proches du MÊME sujet.
+   - Si une source est hors-sujet, ignore-la silencieusement."""
+        structure_b = (
+            "b) 3 à 5 points clés en liste markdown, TOUS centrés sur le sujet de la question ; "
+            "chaque point cite ses sources entre crochets : [1], [2]…"
+        )
+    else:
+        mode_rules = """5. MODE GÉNÉRIQUE (panorama) :
+   - Plusieurs sujets distincts sont bienvenus (style digeste / panorama).
+   - Chaque point clé couvre idéalement un sujet différent tiré des sources."""
+        structure_b = (
+            "b) 3 à 5 points clés en liste markdown ; chaque point cite ses sources "
+            "entre crochets : [1], [2]… correspondant aux numéros de la liste."
+        )
 
     key = get_gemini_key()
     if key or os.getenv("OLLAMA_HOST") or os.getenv("PREFER_OLLAMA", "").lower() == "true":
-        prompt = f"""
-Tu es l'assistant d'un hub de recherche type Perplexity.
+        prompt = f"""Tu es un moteur de synthèse d'actualités ancré sur des sources scrapées (style Perplexity).
 Question utilisateur : "{user_message}"
 
-SOURCES SCRAPÉES (seule vérité autorisée) :
+SOURCES SCRAPÉES NUMÉROTÉES (seule vérité autorisée) :
 {data_str}
 
 Règles ABSOLUES :
-1. Réponds UNIQUEMENT à partir des sources ci-dessus. Aucune connaissance externe.
-2. Si les sources sont insuffisantes, dis-le clairement sans inventer.
-3. 2 à 4 courts paragraphes en français, puis une liste de liens markdown des sources citées.
+1. Réponds UNIQUEMENT à partir des sources numérotées ci-dessus. Aucune connaissance externe.
+2. Si les sources sont insuffisantes ou hors-sujet, dis-le clairement sans inventer.
+3. STRUCTURE OBLIGATOIRE en français (markdown) :
+   a) Une première phrase directe qui répond à la question — interdiction de commencer par une formule générique (« Voici ce que les sources indiquent », « D'après ma recherche », etc.).
+   {structure_b}
+   c) Une dernière phrase courte de contexte ou de mise en perspective, uniquement si les sources le permettent.
 4. N'ajoute aucun conseil financier, médical ou militaire au-delà de ce que disent les sources.
+{mode_rules}
 """
         res = call_llm(prompt)
         if res:
             return res
 
-    # Fallback déterministe sans LLM
-    lines = [f"Voici ce que les sources scrapées indiquent pour « {user_message} » :\n"]
-    for o in offers[:8]:
-        lines.append(f"- **{getattr(o, 'title', '')}** ({getattr(o, 'provider', '')})")
-        desc = getattr(o, "description", "") or ""
+    # Fallback déterministe sans LLM : même structure Perplexity.
+    srcs = _build_numbered_sources(offers)
+    if is_specific:
+        lead = f"Voici ce que les sources disent sur « {user_message} »."
+    else:
+        lead = f"Voici l'essentiel des sources scrapées sur « {user_message} »."
+    lines = [lead, ""]
+    for s in srcs:
+        title = s["title"] or s["url"]
+        provider = s["provider"] or "Source"
+        desc = (s["description"] or "").strip()
+        line = f"- **[{s['n']}] {title}** — {provider}"
         if desc:
-            lines.append(f"  {desc[:160]}")
-        url = getattr(o, "url", "")
-        if url:
-            lines.append(f"  [Source]({url})")
+            clean = " ".join(desc.split())
+            line += f" : {clean[:160]}"
+        if s["url"]:
+            line += f" ([source]({s['url']}))"
+        lines.append(line)
+    lines.append("")
+    lines.append(
+        "Contexte : ces résultats proviennent directement des flux scrapés à "
+        "l'instant ; consulte les articles liés pour aller plus loin."
+    )
     return "\n".join(lines)
 
 def generate_medical_cheat_sheet(
