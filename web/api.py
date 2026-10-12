@@ -9,14 +9,16 @@ import time
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from urllib.parse import urlparse
 
 from bot.credibility.engine import score_offer
 from bot.credibility.trust import backprop_validation
 from bot.models import Favorite
+from models import normalize_image_url
 from bot.orchestrator import Orchestrator
 from bot.store import Store
 from web.email_gen import render_email
-from bot.ai import parse_user_intent, synthesize_digest
+from bot.ai import parse_user_intent, synthesize_digest, strip_cdata
 from bot.dynamic import run_dynamic_scrape
 from bot.auth import get_auth_store, create_token, require_professional, AUTH_OPTIONAL
 from bot.firebase_auth import require_auth_for_request, authenticate_request
@@ -41,6 +43,24 @@ async def _rate_limit(request: Request, max_requests: int = _RATE_MAX, window: f
         bucket.append(now)
         _RATE[ip] = bucket
     return None
+
+
+def _chat_source(o, topic_id=None) -> dict:
+    """Contrat front : titre sans CDATA, url http(s), source, image, topic_id."""
+    url = strip_cdata(getattr(o, "url", "") or "")
+    if urlparse(url).scheme not in ("http", "https"):
+        parsed = urlparse(url)
+        url = f"https://{url}" if not parsed.scheme and url else ""
+    return {
+        "title": strip_cdata(getattr(o, "title", "")),
+        "url": url,
+        "source": strip_cdata(getattr(o, "provider", "") or getattr(o, "source", "") or ""),
+        "image": normalize_image_url(getattr(o, "image_url", "") or ""),
+        "provider": strip_cdata(getattr(o, "provider", "")),
+        "offer_type": getattr(o, "offer_type", ""),
+        "description": strip_cdata(getattr(o, "description", "") or "")[:240],
+        "topic_id": topic_id,
+    }
 
 
 def _auth_guard(authorization: Optional[str], path: str):
@@ -288,6 +308,10 @@ def create_router(store: Store) -> APIRouter:
             intent = analysis.get("intent", "chat")
             query = analysis.get("query", "")
             category = analysis.get("category")
+            specificity = analysis.get("specificity")
+            if intent == "search_news" and specificity not in ("specific", "generic"):
+                from bot.ai import infer_specificity
+                specificity = infer_specificity(message, intent, category, query)
             reply = analysis.get("reply", "Je traite votre demande...")
 
             offers = []
@@ -323,7 +347,7 @@ def create_router(store: Store) -> APIRouter:
             elif intent != "chat" and query:
                 try:
                     offers = await asyncio.to_thread(
-                        run_dynamic_scrape, store, intent, query, category
+                        run_dynamic_scrape, store, intent, query, category, specificity
                     )
                 except Exception as e_scr:
                     log.warning("[chat] Erreur scraping dynamique : %s", e_scr)
@@ -331,7 +355,9 @@ def create_router(store: Store) -> APIRouter:
 
                 if offers:
                     try:
-                        digest = synthesize_digest(message, offers)
+                        digest = synthesize_digest(
+                            message, offers, specificity=specificity or "generic"
+                        )
                         reply = digest or reply
                     except Exception as e_dig:
                         log.warning("[chat] Erreur synthèse digest : %s", e_dig)
@@ -348,16 +374,22 @@ def create_router(store: Store) -> APIRouter:
                     "Tu peux aussi dire « suis SpaceX » ou « suis la guerre en Iran » pour créer un dashboard."
                 )
 
-            sources = [
-                {
-                    "title": o.title,
-                    "url": o.url,
-                    "provider": o.provider,
-                    "offer_type": o.offer_type,
-                    "description": (o.description or "")[:240],
-                }
-                for o in offers[:15]
-            ]
+            sources = []
+            match_fn = None
+            if intent == "search_news" and specificity != "specific":
+                try:
+                    from bot.news_digest import match_topic_id
+                    match_fn = match_topic_id
+                except Exception:
+                    match_fn = None
+            for o in offers[:15]:
+                tid = None
+                if match_fn:
+                    try:
+                        tid = match_fn(store, getattr(o, "title", "") or "")
+                    except Exception:
+                        tid = None
+                sources.append(_chat_source(o, topic_id=tid))
             if history:
                 try:
                     history.add(session_id, "assistant", reply, sources)
@@ -368,6 +400,7 @@ def create_router(store: Store) -> APIRouter:
                 "intent": intent,
                 "query": query,
                 "category": category,
+                "specificity": specificity,
                 "reply": reply,
                 "session_id": session_id,
                 "sources": sources,
