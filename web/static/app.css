@@ -56,10 +56,11 @@ body {
   border-right: 1px solid var(--brd);
   display: flex;
   flex-direction: column;
-  padding: 14px 12px;
+  padding: 14px 12px calc(12px + env(safe-area-inset-bottom, 0px));
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
   z-index: 30;
 }
 .sidebar-top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -75,7 +76,7 @@ body {
   cursor: pointer; font: inherit; font-weight: 700;
 }
 .btn-new:hover { border-color: var(--accent); }
-.sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .nav-label {
   margin: 14px 8px 6px; font-size: .75rem; letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted-subtle); font-weight: 750;
@@ -91,19 +92,31 @@ body {
 .nav-item.active {
   background: var(--accent-soft); color: var(--accent); font-weight: 750;
 }
-.sidebar-history { flex: 1; overflow: auto; margin-top: 8px; }
-.history-list { display: flex; flex-direction: column; gap: 2px; }
-.history-item {
+.sidebar-history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.history-list { display: flex; flex-direction: column; gap: 2px; }.history-item {
   border: none; background: transparent; color: var(--nav-txt);
   text-align: left; padding: 8px 10px; border-radius: 10px;
   cursor: pointer; font: inherit; font-size: .88rem; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .history-item:hover { background: var(--accent-soft); color: var(--accent); }
-.sidebar-foot { padding-top: 10px; border-top: 1px solid var(--brd); }
+.sidebar-foot {
+  flex-shrink: 0;              /* jamais écrasé par l'historique */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding-top: 10px;
+  border-top: 1px solid var(--brd);
+}
 .btn-theme {
   width: 100%; border: 1.5px solid var(--brd); background: var(--bg);
-  color: var(--txt); border-radius: 12px; padding: 10px; cursor: pointer; font: inherit; font-weight: 600;
+  color: var(--txt); border-radius: 12px; padding: 10px; cursor: pointer;
+  font: inherit; font-weight: 600; min-height: 44px;   /* cible tactile ≥44px */
 }
 
 .main-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -218,6 +231,42 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* --- Barre de KPI (soldes paper trading, stats dashboards) --- */
+.dash-kpis {
+  max-width: 980px;
+  margin: 0 auto 18px;
+  padding: 0 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.kpi {
+  background: var(--bg2);
+  border: 1px solid var(--brd);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.kpi:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.kpi b {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--txt);
+  line-height: 1.2;
+}
+.kpi span {
+  font-size: 0.78rem;
+  color: var(--muted-subtle);
+  letter-spacing: 0.02em;
 }
 
 .discover-card {
