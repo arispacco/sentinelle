@@ -11,6 +11,7 @@ from bot.models import Offer
 from bot.store import Store
 from bot.credibility.engine import score_offer
 from bot.credibility.dna import offer_dna
+from models import normalize_image_url, strip_cdata
 from normalizer import classify, matches_keywords
 from scrapers.base import BaseScraper
 from config import DEFAULT_HEADERS, REQUEST_TIMEOUT, DYNAMIC_TIMEOUT
@@ -42,17 +43,26 @@ class DynamicScraper(BaseScraper):
         if not xml_content:
             return []
 
-        soup = BeautifulSoup(xml_content, "html.parser")
+        soup = BeautifulSoup(xml_content, "xml")
         items = soup.find_all("item")
         offers: List[Offer] = []
 
         for item in items[:15]:  # Retourner max 15 résultats
-            title = item.find("title").get_text() if item.find("title") else ""
+            title = strip_cdata(item.find("title").get_text() if item.find("title") else "")
             link = item.find("link").get_text() if item.find("link") else ""
             desc_raw = item.find("description").get_text() if item.find("description") else ""
             desc_soup = BeautifulSoup(desc_raw, "html.parser")
-            description = desc_soup.get_text().replace("&nbsp;", " ").strip()
-            
+            description = strip_cdata(desc_soup.get_text().replace("&nbsp;", " "))
+
+            # Image : media:thumbnail / media:content / enclosure / itunes:image
+            image_url = ""
+            for tag_name in ("media:thumbnail", "media:content", "itunes:image"):
+                media = item.find(tag_name)
+                if media:
+                    image_url = normalize_image_url(media.get("url", ""))
+                    if image_url:
+                        break
+
             provider = "Google News"
             if " - " in title:
                 parts = title.rsplit(" - ", 1)
@@ -67,6 +77,7 @@ class DynamicScraper(BaseScraper):
                 offer_type=offer_type,
                 description=description or "Aucun résumé disponible.",
                 keywords_matched=[query],
+                image_url=image_url,
             ))
 
         return offers
@@ -153,11 +164,40 @@ def convert_to_bot_offer(raw) -> Offer:
         network="web",
         description=getattr(raw, "description", ""),
         keywords_matched=getattr(raw, "keywords_matched", []),
+        image_url=getattr(raw, "image_url", ""),
     )
     return o
 
 
-def run_dynamic_scrape(store: Store, intent: str, query: str, category: Optional[str] = None) -> List[Offer]:
+def _filter_news_by_query(offers: List[Offer], query: str) -> List[Offer]:
+    """Conserve les articles dont le titre/description overlapent les tokens de la query."""
+    from bot.news_digest import normalize_tokens, jaccard
+
+    q_tokens = normalize_tokens(query or "")
+    if not q_tokens or not offers:
+        return offers
+    scored = []
+    for o in offers:
+        blob = f"{getattr(o, 'title', '')} {getattr(o, 'description', '')}"
+        t = normalize_tokens(blob)
+        score = jaccard(q_tokens, t)
+        if score <= 0 and any(tok in blob.lower() for tok in q_tokens):
+            score = 0.15
+        if score > 0:
+            scored.append((score, o))
+    if not scored:
+        return offers[:8]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [o for _, o in scored]
+
+
+def run_dynamic_scrape(
+    store: Store,
+    intent: str,
+    query: str,
+    category: Optional[str] = None,
+    specificity: Optional[str] = None,
+) -> List[Offer]:
     """Exécute un scraping en temps réel selon l'intention et la requête de l'utilisateur."""
     scraper = DynamicScraper()
     raw_offers: List[Offer] = []
@@ -217,13 +257,23 @@ def run_dynamic_scrape(store: Store, intent: str, query: str, category: Optional
         ))
         
     elif intent == "search_news":
-        # Si c'est une catégorie connue (ex: tech, sport...)
         from scrapers.news import NEWS_SOURCES, NewsScraper
-        if category in NEWS_SOURCES:
+        is_specific = (specificity or "").lower() == "specific"
+        if is_specific and query:
+            # Question ciblée : Google News sur les mots-clés + filtrage Jaccard
+            raw_offers.extend(scraper.search_google_news(query, "news"))
+            if category in NEWS_SOURCES:
+                raw_offers.extend(NewsScraper().run_category(category))
+            raw_offers = _filter_news_by_query(raw_offers, query)
+        elif category in NEWS_SOURCES:
             raw_offers.extend(NewsScraper().run_category(category))
         else:
-            # Recherche générique Google News
             raw_offers.extend(scraper.search_google_news(query, "news"))
+        try:
+            from bot.og_image import enrich_with_og_images
+            enrich_with_og_images(raw_offers)
+        except Exception as e_img:
+            log.debug("[dynamic] enrichissement og:image échoué : %s", e_img)
             
     elif intent == "search_offers":
         # Recherche d'offres promotionnelles sur HN, Reddit et Google News
