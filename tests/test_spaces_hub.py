@@ -72,10 +72,12 @@ class TestSpacesCatalog(unittest.TestCase):
             "provider": "Polymarket",
             "offer_type": "prediction",
             "description": "55%",
+            "yes_price": 0.55,
         }]
         with mock.patch("scrapers.predictions.PredictionsScraper.markets_as_dicts", return_value=fake):
             data = spaces.load_space_items("predictions")
             self.assertEqual(data["items"][0]["offer_type"], "prediction")
+            self.assertAlmostEqual(data["items"][0]["yes_price"], 0.55)
 
 
 class TestSpacesApi(unittest.TestCase):
