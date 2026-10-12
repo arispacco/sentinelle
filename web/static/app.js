@@ -32,6 +32,7 @@ const state = {
   oppTab: "feed",
   watchRefreshTimer: null,
   watchAssetClass: null,
+  news: { items: [], total: 0, offset: 0, loading: false, knownIds: null, io: null, pollTimer: null, currentTopic: null, category: "" },
 };
 
 localStorage.setItem("scout_session", state.sessionId);
@@ -70,14 +71,33 @@ function esc(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// N'accepte que les URLs http(s)/mailto : tout le reste (javascript:, data:, ...) devient "#".
+function safeUrl(u) {
+  const s = String(u || "").trim();
+  return /^(https?:|mailto:)/i.test(s) ? s : "#";
 }
 
 function mdToHtml(md) {
   let h = esc(md);
   h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   h = h.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Listes markdown (- item, * item, 1. item) → vraies listes HTML
+  h = h.replace(/(^|\n)((?:[ \t]*(?:[-*]|\d+\.)[ \t]+[^\n]+(?:\n|$))+)/g, (m, pre, block) => {
+    const lines = block.trim().split("\n");
+    const ordered = /^[ \t]*\d+\./.test(lines[0]);
+    const items = lines
+      .map((l) => l.replace(/^[ \t]*(?:[-*]|\d+\.)[ \t]+/, "").trim())
+      .filter(Boolean)
+      .map((l) => `<li>${l}</li>`)
+      .join("");
+    return `${pre}<${ordered ? "ol" : "ul"}>${items}</${ordered ? "ol" : "ul"}>`;
+  });
   h = h.replace(/\n/g, "<br>");
+  h = h.replace(/(<\/(?:ul|ol)>)<br>/g, "$1").replace(/<br>(<(?:ul|ol)>)/g, "$1");
   return h;
 }
 
@@ -201,6 +221,83 @@ async function init() {
   });
   $("#btnSidebar")?.addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 
+  // --- Câblage des anciens handlers inline (aucun onclick= restant dans index.html) ---
+  document.querySelectorAll("[data-quick-query]").forEach((btn) => {
+    btn.addEventListener("click", () => quickQuery(btn.dataset.quickQuery));
+  });
+  document.querySelectorAll("[data-nav]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const v = el.dataset.nav;
+      if (v === "home-focus") {
+        showView("home");
+        $("#homeInput").focus();
+        return;
+      }
+      if (v === "watches") {
+        showView("watches");
+        loadWatches();
+      } else {
+        showView(v);
+        if (v === "learn") loadLearn();
+        else if (v === "medical-pro") {
+          loadMedicalStats();
+          loadMedicalRecords();
+        }
+      }
+    });
+    // Les pillar-card sont focusables : Entrée/Espace = clic
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        el.click();
+      }
+    });
+  });
+  document.querySelectorAll("[data-nav-link]").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const v = a.dataset.navLink;
+      showView(v);
+      if (v === "watches") loadWatches();
+      else if (v === "learn") loadLearn();
+      else if (v === "medical-pro") {
+        loadMedicalStats();
+        loadMedicalRecords();
+      }
+    });
+  });
+  $("#btnCtaLogin")?.addEventListener("click", () => $("#loginModal")?.classList.remove("hidden"));
+  $("#btnPrintMedical")?.addEventListener("click", () => window.print());
+  document.querySelectorAll("[data-amount-preset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = $(btn.dataset.amountPreset);
+      if (!input) return;
+      input.value = btn.dataset.amountValue;
+      updateBetPayout();
+    });
+  });
+  document.querySelectorAll("[data-beginner-side]").forEach((btn) => {
+    btn.addEventListener("click", () => executeBeginnerSide(btn.dataset.beginnerSide));
+  });
+  $("#beginnerOrderForm")?.addEventListener("submit", (e) => e.preventDefault());
+  document.querySelectorAll("[data-asset]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      try {
+        const a = JSON.parse(btn.dataset.asset);
+        selectAsset(a.symbol, a.name);
+      } catch (_) {}
+    });
+  });
+  document.querySelectorAll("[data-learn-prompt]").forEach((btn) => {
+    btn.addEventListener("click", () => askLearnPrompt(btn.dataset.learnPrompt));
+  });
+  const rangeBeginner = $("#learnChartRangeBeginner");
+  rangeBeginner?.addEventListener("change", () => {
+    const pro = $(rangeBeginner.dataset.syncRange);
+    if (pro) pro.value = rangeBeginner.value;
+    loadLearnChart();
+  });
+
   // Auth event listeners
   $("#btnLogin")?.addEventListener("click", () => $("#loginModal")?.classList.remove("hidden"));
   $("#loginClose")?.addEventListener("click", () => $("#loginModal")?.classList.add("hidden"));
@@ -224,8 +321,14 @@ async function init() {
     $("#homeLanding").classList.remove("hidden");
     showView("home");
   });
-  $("#homeForm").addEventListener("submit", () => ask($("#homeInput").value));
-  $("#threadForm").addEventListener("submit", () => ask($("#threadInput").value));
+  $("#homeForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    ask($("#homeInput").value);
+  });
+  $("#threadForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    ask($("#threadInput").value);
+  });
   $("#btnSpaceRefresh").addEventListener("click", () => loadSpace(state.currentSpace));
   $("#btnSpaceAsk").addEventListener("click", () => {
     const title = state.spaces.find((s) => s.slug === state.currentSpace)?.title || state.currentSpace;
@@ -248,6 +351,10 @@ async function init() {
       } else if (v === "opportunities") {
         showView("opportunities");
         loadOpportunitiesView();
+      } else if (v === "news") {
+        showView("news");
+        loadNews({ reset: true });
+        startNewsPolling();
       } else if (v === "profile") {
         showView("profile");
         loadProfile();
@@ -265,6 +372,13 @@ async function init() {
         loadMedicalRecords();
       }
     });
+  });
+
+  $("#btnNewsRefresh")?.addEventListener("click", refreshNewsManual);
+  setupNewsCategoryTabs();
+  $("#btnNewsBanner")?.addEventListener("click", () => {
+    $("#newsBanner")?.classList.add("hidden");
+    $("#newsList")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   $("#watchCreateForm")?.addEventListener("submit", createWatchFromForm);
