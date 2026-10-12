@@ -654,10 +654,13 @@ def create_router(store: Store) -> APIRouter:
         company: Optional[str] = None,
         limit: int = 40,
     ):
-        from bot.opportunities import collect_opportunities
-        items = await asyncio.to_thread(
-            collect_opportunities, type, q, city, country, company, limit
-        )
+        from bot.opportunities import collect_opportunities, feed_for_profile
+        if type == "feed":
+            items = await asyncio.to_thread(feed_for_profile, min(limit, 20))
+        else:
+            items = await asyncio.to_thread(
+                collect_opportunities, type, q, city, country, company, limit
+            )
         return {"items": items, "count": len(items)}
 
     @router.get("/opportunities/feed")
