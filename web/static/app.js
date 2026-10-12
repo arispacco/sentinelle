@@ -814,6 +814,134 @@ async function loadNews({ reset = false } = {}) {
   }
 }
 
+function setupNewsInfiniteScroll() {
+  if (state.news.io) return;
+  const sentinel = document.createElement("div");
+  sentinel.id = "newsSentinel";
+  sentinel.style.height = "10px";
+  $("#newsList").after(sentinel);
+  state.news.io = new IntersectionObserver((entries) => {
+    if (entries.some((en) => en.isIntersecting) && state.news.offset < state.news.total) {
+      loadNews();
+    }
+  }, { rootMargin: "400px" });
+  state.news.io.observe(sentinel);
+}
+
+function setNewsCategory(cat) {
+  state.news.category = cat || "";
+  state.news.knownIds = null;
+  document.querySelectorAll(".news-cat").forEach((btn) => {
+    const active = (btn.dataset.cat || "") === state.news.category;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  // Reset infinite scroll sentinel
+  if (state.news.io) {
+    try { state.news.io.disconnect(); } catch (_) {}
+    state.news.io = null;
+    const sent = $("#newsSentinel");
+    if (sent) sent.remove();
+  }
+  loadNews({ reset: true });
+}
+
+function setupNewsCategoryTabs() {
+  const wrap = $("#newsCats");
+  if (!wrap || wrap.dataset.ready) return;
+  wrap.dataset.ready = "1";
+  wrap.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".news-cat");
+    if (!btn) return;
+    setNewsCategory(btn.dataset.cat || "");
+  });
+}
+
+function openNewsFromChat(topicId) {
+  if (!topicId) return;
+  showView("news");
+  openNewsArticle(topicId);
+}
+window.openNewsFromChat = openNewsFromChat;
+
+async function openNewsArticle(topicId) {
+  const wrap = $("#newsArticleView");
+  if (!wrap) return;
+  showView("news-article");
+  wrap.innerHTML = '<div class="news-skeleton"></div>';
+  try {
+    const t = await api(`/api/news/topics/${encodeURIComponent(topicId)}`);
+    if (t && t.error) throw new Error(t.error);
+    const sources = Array.isArray(t.sources) ? t.sources : [];
+    const srcRows = sources.map((s, i) => {
+      const url = safeUrl(s.url);
+      const thumb = chatSourceThumb(s);
+      return `<div class="src-row">
+        ${thumb}
+        <div>
+          <a class="t" href="${esc(url)}" target="_blank" rel="noopener">[${i + 1}] ${esc(s.title || url)}</a>
+          <span class="n">${esc(s.source || s.provider || "source")} — ${esc(newsRelTime(s.published || t.first_seen))}</span>
+        </div>
+      </div>`;
+    }).join("");
+    wrap.innerHTML = `
+      <div class="news-article">
+        <button class="back" type="button" id="btnNewsBack">← Toutes les actualités</button>
+        <h1>${esc(t.title || "")}</h1>
+        <div class="article-meta">
+          <span class="badge-ia">✦ Synthèse IA Sentinelle</span>
+          · ${esc(String(t.source_count ?? sources.length))} sources · ${esc(newsRelTime(t.first_seen || t.last_seen))}
+        </div>
+        <div class="article-body">${mdToHtml(t.summary_md || "Synthèse en cours de rédaction…")}</div>
+        ${sources.length ? `<div class="news-sources"><h3>Sources utilisées (${sources.length})</h3>${srcRows}</div>` : ""}
+      </div>`;
+    $("#btnNewsBack").addEventListener("click", () => {
+      showView("news");
+      wrap.innerHTML = "";
+    });
+  } catch (e) {
+    wrap.innerHTML = `<div class="news-article"><p class="muted">Sujet indisponible : ${esc(e.message || "erreur")}</p></div>`;
+  }
+}
+
+async function refreshNewsManual() {
+  const btn = $("#btnNewsRefresh");
+  if (!btn) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Actualisation…";
+  try {
+    await api("/api/news/refresh", { method: "POST", body: "{}" });
+  } catch (_) {}
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = original;
+    loadNews({ reset: true });
+  }, 3000);
+}
+
+function startNewsPolling() {
+  if (state.news.pollTimer) return;
+  state.news.pollTimer = setInterval(async () => {
+    if (document.hidden || state.news.loading) return;
+    try {
+      const { items } = await newsFetchPage(0);
+      const fresh = items.filter((t) => !state.news.knownIds.has(String(t.id)));
+      if (fresh.length) {
+        const banner = $("#newsBanner");
+        if (banner && $("#view-news") && $("#view-news").classList.contains("active")) {
+          banner.classList.remove("hidden");
+          $("#btnNewsBanner").textContent = `${fresh.length} nouveau${fresh.length > 1 ? "x" : ""} sujet${fresh.length > 1 ? "s" : ""} — afficher`;
+        } else {
+          for (const t of fresh) state.news.knownIds.add(String(t.id));
+          renderNewsPage(fresh, { prepend: true });
+          state.news.items = fresh.concat(state.news.items);
+        }
+      }
+    } catch (_) {}
+  }, 60000);
+}
+
 function appendBubble(role, content, sources = []) {
   const box = $("#threadMessages");
   const el = document.createElement("div");
