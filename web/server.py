@@ -223,7 +223,7 @@ def create_app(store: Store = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=explicit_origins,
         allow_origin_regex=r"^https?://([a-zA-Z0-9_\-]+\.)*(onrender\.com|localhost|127\.0\.0\.1)(:\d+)?$",
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
