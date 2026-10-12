@@ -7,15 +7,15 @@
 <title>Sentinelle — Veille & Recherche Intelligente</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/app.css?v=3">
+<link rel="stylesheet" href="/static/app.css?v=7">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
-  // Cache-bust static assets after market charts upgrade
-  window.SCOUT_ASSET_V = "3";
+  // Cache-bust global : doit rester cohérent avec app.css?v / app.js?v et SHELL dans sw.js
+  window.SCOUT_ASSET_V = "7";
 </script>
 <!-- Firebase Auth & Analytics -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -40,6 +40,7 @@
     </div>
     <nav class="sidebar-nav">
       <button class="nav-item active" data-view="home" type="button">Recherche</button>
+      <button class="nav-item" data-view="news" type="button">Actualités</button>
       <button class="nav-item" data-view="opportunities" type="button">Opportunités</button>
       <button class="nav-item" data-view="watches" type="button">Mes suivis</button>
       <button class="nav-item" data-view="learn" type="button">Learn Trading</button>
@@ -87,26 +88,26 @@
           Recherche IA sourcée par scraping continu, veille clinique pour praticiens africains, et analyse de marché en direct. Zéro hallucination, 100% vérifié.
         </p>
         
-        <form id="homeForm" class="ask-box" onsubmit="event.preventDefault();">
+        <form id="homeForm" class="ask-box">
           <textarea id="homeInput" rows="2" placeholder="Posez une question ou demandez un suivi (ex: « essais cliniques paludisme », « cours BTC »)..." autocomplete="off"></textarea>
           <div class="ask-toolbar">
             <span class="muted small">🔍 Sources live · 🏥 Médical B2B · 📈 Crypto & Actions · 🌍 Opportunités</span>
             <button type="submit" class="primary ask-send">Rechercher</button>
           </div>
         </form>
-        
+
         <div class="space-chips" id="spaceChips"></div>
         <div class="landing-examples">
           <span class="muted small">Suggestions rapides :</span>
-          <button type="button" class="chip-example" onclick="quickQuery('Dernières offres IA et crédits cloud gratuits')">🎁 Offres IA gratuites</button>
-          <button type="button" class="chip-example" onclick="quickQuery('Essais cliniques paludisme et drépanocytose en Afrique')">🏥 Essais cliniques Afrique</button>
-          <button type="button" class="chip-example" onclick="quickQuery('Cours et analyse technique Bitcoin Ethereum')">📈 Marché Crypto Live</button>
-          <button type="button" class="chip-example" onclick="quickQuery('suis SpaceX et Starlink')">🚀 Suivi SpaceX</button>
+          <button type="button" class="chip-example" data-quick-query="Dernières offres IA et crédits cloud gratuits">🎁 Offres IA gratuites</button>
+          <button type="button" class="chip-example" data-quick-query="Essais cliniques paludisme et drépanocytose en Afrique">🏥 Essais cliniques Afrique</button>
+          <button type="button" class="chip-example" data-quick-query="Cours et analyse technique Bitcoin Ethereum">📈 Marché Crypto Live</button>
+          <button type="button" class="chip-example" data-quick-query="suis SpaceX et Starlink">🚀 Suivi SpaceX</button>
         </div>
 
         <!-- 3 Piliers de valeur -->
         <div class="landing-pillars">
-          <div class="pillar-card" onclick="showView('home'); $('#homeInput').focus();">
+          <div class="pillar-card" data-nav="home-focus" role="button" tabindex="0">
             <div class="pillar-icon">🔍</div>
             <div class="pillar-tag">Perplexity-Style</div>
             <h3>Recherche Ancrée</h3>
@@ -114,7 +115,7 @@
             <span class="pillar-link">Poser une question →</span>
           </div>
 
-          <div class="pillar-card" onclick="showView('medical-pro')">
+          <div class="pillar-card" data-nav="medical-pro" role="button" tabindex="0">
             <div class="pillar-icon">🏥</div>
             <div class="pillar-tag">B2B Santé</div>
             <h3>Portail Clinique & Plantes</h3>
@@ -122,7 +123,7 @@
             <span class="pillar-link">Consulter le portail pro →</span>
           </div>
 
-          <div class="pillar-card" onclick="showView('learn')">
+          <div class="pillar-card" data-nav="learn" role="button" tabindex="0">
             <div class="pillar-icon">📈</div>
             <div class="pillar-tag">Temps Réel</div>
             <h3>Simulateur de Marché</h3>
@@ -157,7 +158,7 @@
             <h3>Passez à la veille active avec Sentinelle</h3>
             <p class="muted">Créez votre compte gratuit en 1 clic pour enregistrer vos alertes, vos favoris et vos dashboards de suivi.</p>
           </div>
-          <button class="primary btn-cta-login" onclick="$('#loginModal')?.classList.remove('hidden')">
+          <button class="primary btn-cta-login" id="btnCtaLogin" type="button">
             🚀 Se connecter / S'inscrire
           </button>
         </div>
@@ -170,18 +171,18 @@
           <div class="footer-links">
             <span>© 2026 Sentinelle — Veille & Recherche Intelligente</span>
             <span>·</span>
-            <a href="#" onclick="showView('medical-pro')">Santé B2B</a>
+            <a href="#" data-nav-link="medical-pro">Santé B2B</a>
             <span>·</span>
-            <a href="#" onclick="showView('watches')">Mes suivis</a>
+            <a href="#" data-nav-link="watches">Mes suivis</a>
             <span>·</span>
-            <a href="#" onclick="showView('learn')">Trading</a>
+            <a href="#" data-nav-link="learn">Trading</a>
           </div>
         </footer>
       </div>
 
       <div id="chatThread" class="chat-thread hidden">
         <div id="threadMessages" class="thread-messages"></div>
-        <form id="threadForm" class="ask-box ask-box-sticky" onsubmit="event.preventDefault();">
+        <form id="threadForm" class="ask-box ask-box-sticky">
           <textarea id="threadInput" rows="1" placeholder="Affiner la recherche..." autocomplete="off"></textarea>
           <div class="ask-toolbar">
             <button type="button" class="btn" id="btnBackHome">Accueil</button>
@@ -191,12 +192,42 @@
       </div>
     </section>
 
+    <!-- NEWS (synthèses IA type Perplexity) -->
+    <section id="view-news" class="view">
+      <div class="news-head">
+        <div>
+          <h2>Actualités</h2>
+          <p class="muted">Synthèses rédigées par l'IA de Sentinelle à partir des sources mondiales — mises à jour toutes les 15 minutes.</p>
+        </div>
+        <button class="primary" id="btnNewsRefresh" type="button">Actualiser maintenant</button>
+      </div>
+      <div class="news-cats" id="newsCats" role="tablist" aria-label="Catégories d'actualités">
+        <button type="button" class="news-cat active" data-cat="" role="tab" aria-selected="true">Toutes</button>
+        <button type="button" class="news-cat" data-cat="ia" role="tab">IA</button>
+        <button type="button" class="news-cat" data-cat="tech" role="tab">Tech</button>
+        <button type="button" class="news-cat" data-cat="sport" role="tab">Sport</button>
+        <button type="button" class="news-cat" data-cat="finance" role="tab">Finance</button>
+        <button type="button" class="news-cat" data-cat="politic" role="tab">Politique</button>
+        <button type="button" class="news-cat" data-cat="economie" role="tab">Économie</button>
+        <button type="button" class="news-cat" data-cat="afrique" role="tab">Afrique</button>
+        <button type="button" class="news-cat" data-cat="international" role="tab">International</button>
+        <button type="button" class="news-cat" data-cat="top" role="tab">À la une</button>
+      </div>
+      <div class="news-banner hidden" id="newsBanner"><button type="button" id="btnNewsBanner"></button></div>
+      <div class="news-list" id="newsList">
+        <div class="news-skeleton"></div>
+        <div class="news-skeleton"></div>
+        <div class="news-skeleton"></div>
+      </div>
+      <div class="news-list hidden" id="newsArticleView"></div>
+    </section>
+
     <!-- WATCHES -->
     <section id="view-watches" class="view">
       <div class="space-header">
         <h2>Mes suivis</h2>
         <p class="muted">Dashboards d'évolution : entreprises, conflits, événements.</p>
-        <form id="watchCreateForm" class="space-actions" onsubmit="event.preventDefault();">
+        <form id="watchCreateForm" class="space-actions">
           <input type="text" id="watchTitle" placeholder="Ex: SpaceX, Google, Chine-Taïwan, Iran..." required>
           <select id="watchKind">
             <option value="">Auto</option>
@@ -293,37 +324,50 @@
 
     <!-- PROFILE -->
     <section id="view-profile" class="view">
-      <div class="panel">
-        <h2>Mon profil</h2>
-        <p class="muted">Local uniquement — guide digests et matching d'opportunités.</p>
-        <form id="profileForm" class="profile-form" onsubmit="event.preventDefault();">
-          <label>Prénom / nom d'affichage
-            <input type="text" id="pfName" placeholder="Aristide">
-          </label>
-          <label>Compétences (virgules)
-            <input type="text" id="pfSkills" placeholder="Python, Flutter, scraping">
-          </label>
-          <label>Centres d'intérêt (virgules)
-            <input type="text" id="pfInterests" placeholder="tech, finance, média">
-          </label>
-          <label>Ville
-            <input type="text" id="pfCity" placeholder="Douala">
-          </label>
-          <label>Pays
-            <input type="text" id="pfCountry" placeholder="Cameroun">
-          </label>
-          <label>Entreprises préférées (virgules)
-            <input type="text" id="pfCompanies" placeholder="Google, MTN, Kmer Job">
-          </label>
-          <label>Niveau trading
-            <select id="pfTrading">
-              <option value="beginner">Débutant</option>
-              <option value="intermediate">Intermédiaire</option>
-              <option value="pro">Pro</option>
-            </select>
-          </label>
-          <button class="primary" type="submit">Enregistrer</button>
-          <p class="muted small" id="profileSaved"></p>
+      <div class="profile-card panel">
+        <header class="profile-head">
+          <h2>Mon profil</h2>
+          <p class="muted">Local uniquement — guide digests et matching d'opportunités.</p>
+        </header>
+        <form id="profileForm" class="profile-form">
+          <div class="profile-grid">
+            <label class="field">
+              <span class="field-label">Prénom / nom d'affichage</span>
+              <input type="text" id="pfName" placeholder="Aristide">
+            </label>
+            <label class="field">
+              <span class="field-label">Ville</span>
+              <input type="text" id="pfCity" placeholder="Douala">
+            </label>
+            <label class="field field-span-2">
+              <span class="field-label">Compétences (virgules)</span>
+              <input type="text" id="pfSkills" placeholder="Python, Flutter, scraping">
+            </label>
+            <label class="field field-span-2">
+              <span class="field-label">Centres d'intérêt (virgules)</span>
+              <input type="text" id="pfInterests" placeholder="tech, finance, média">
+            </label>
+            <label class="field">
+              <span class="field-label">Pays</span>
+              <input type="text" id="pfCountry" placeholder="Cameroun">
+            </label>
+            <label class="field">
+              <span class="field-label">Entreprises préférées</span>
+              <input type="text" id="pfCompanies" placeholder="Google, MTN, Kmer Job">
+            </label>
+            <label class="field field-span-2">
+              <span class="field-label">Niveau trading</span>
+              <select id="pfTrading">
+                <option value="beginner">Débutant</option>
+                <option value="intermediate">Intermédiaire</option>
+                <option value="pro">Pro</option>
+              </select>
+            </label>
+          </div>
+          <div class="profile-actions">
+            <button class="primary btn-profile-save" type="submit">Enregistrer</button>
+            <p class="muted small profile-saved-msg" id="profileSaved"></p>
+          </div>
         </form>
       </div>
     </section>
@@ -355,23 +399,23 @@
         <div class="panel" style="margin-bottom:14px;">
           <h3 style="margin:0 0 10px;">1. Choisir un actif à analyser :</h3>
           <div class="landing-examples" style="justify-content:flex-start;margin:0 0 14px;">
-            <button type="button" class="chip-example" onclick="selectAsset('GOOGL', 'Google')">🔍 Google (GOOGL)</button>
-            <button type="button" class="chip-example" onclick="selectAsset('AAPL', 'Apple')">🍎 Apple (AAPL)</button>
-            <button type="button" class="chip-example" onclick="selectAsset('TSLA', 'Tesla')">🚗 Tesla (TSLA)</button>
-            <button type="button" class="chip-example" onclick="selectAsset('NVDA', 'Nvidia')">⚡ Nvidia (NVDA)</button>
-            <button type="button" class="chip-example" onclick="selectAsset('BTCUSDT', 'Bitcoin')">₿ Bitcoin (BTC)</button>
-            <button type="button" class="chip-example" onclick="selectAsset('ETHUSDT', 'Ethereum')">Ξ Ethereum (ETH)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"GOOGL","name":"Google"}'>🔍 Google (GOOGL)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"AAPL","name":"Apple"}'>🍎 Apple (AAPL)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"TSLA","name":"Tesla"}'>🚗 Tesla (TSLA)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"NVDA","name":"Nvidia"}'>⚡ Nvidia (NVDA)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"BTCUSDT","name":"Bitcoin"}'>₿ Bitcoin (BTC)</button>
+            <button type="button" class="chip-example" data-asset='{"symbol":"ETHUSDT","name":"Ethereum"}'>Ξ Ethereum (ETH)</button>
           </div>
           
-          <div class="space-actions" style="margin-bottom:8px;">
-            <strong id="beginnerAssetTitle" style="font-size:1.1rem;">Cours de GOOGL</strong>
-            <select id="learnChartRangeBeginner" onchange="$('#learnChartRange').value=this.value; loadLearnChart();">
-              <option value="5d">5 jours</option>
-              <option value="1mo" selected>1 mois</option>
-              <option value="3mo">3 mois</option>
-              <option value="1y">1 an</option>
-            </select>
-          </div>
+        <div class="space-actions">
+          <strong id="beginnerAssetTitle" style="font-size:1.1rem;">Cours de GOOGL</strong>
+          <select id="learnChartRangeBeginner" data-sync-range="learnChartRange">
+            <option value="5d">5 jours</option>
+            <option value="1mo" selected>1 mois</option>
+            <option value="3mo">3 mois</option>
+            <option value="1y">1 an</option>
+          </select>
+        </div>
           <div id="learnChartBeginner" style="width:100%;height:260px;"></div>
         </div>
 
@@ -380,19 +424,19 @@
           <div class="panel">
             <h3>2. Passer un ordre virtuel</h3>
             <p class="muted small">Achetez ou vendez au cours actuel sans réglages complexes.</p>
-            <form id="beginnerOrderForm" onsubmit="event.preventDefault(); placeBeginnerOrder();">
+            <form id="beginnerOrderForm">
               <div style="margin-bottom:12px;">
                 <label class="muted small">Montant virtuel à allouer ($) :</label>
                 <div style="display:flex;gap:6px;margin:6px 0;">
-                  <button type="button" class="chip-example" onclick="$('#beginnerAmount').value=100">$100</button>
-                  <button type="button" class="chip-example" onclick="$('#beginnerAmount').value=500">$500</button>
-                  <button type="button" class="chip-example" onclick="$('#beginnerAmount').value=1000">$1 000</button>
+                  <button type="button" class="chip-example" data-amount-preset="#beginnerAmount" data-amount-value="100">$100</button>
+                  <button type="button" class="chip-example" data-amount-preset="#beginnerAmount" data-amount-value="500">$500</button>
+                  <button type="button" class="chip-example" data-amount-preset="#beginnerAmount" data-amount-value="1000">$1 000</button>
                 </div>
                 <input type="number" id="beginnerAmount" value="500" min="10" step="10" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);font-weight:700;">
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;">
-                <button type="button" class="primary" style="background:#10B981;border-color:#10B981;padding:12px;" onclick="executeBeginnerSide('buy')">🟢 Acheter (Parier sur la hausse)</button>
-                <button type="button" class="primary" style="background:#EF4444;border-color:#EF4444;padding:12px;" onclick="executeBeginnerSide('sell')">🔴 Vendre (Parier sur la baisse)</button>
+                <button type="button" class="primary" style="background:#10B981;border-color:#10B981;padding:12px;" data-beginner-side="buy">🟢 Acheter (Parier sur la hausse)</button>
+                <button type="button" class="primary" style="background:#EF4444;border-color:#EF4444;padding:12px;" data-beginner-side="sell">🔴 Vendre (Parier sur la baisse)</button>
               </div>
               <p class="muted small" id="beginnerTradeMsg" style="margin-top:10px;"></p>
             </form>
@@ -444,13 +488,13 @@
           <!-- Terminal d'ordres pro -->
           <div class="panel" id="learnTradePanel">
             <h3>⚡ Carnet & Ordres Pro</h3>
-            <form id="learnOrderForm" class="profile-form" onsubmit="event.preventDefault(); placeLearnOrder();">
+            <form id="learnOrderForm" class="profile-form">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                 <label>Action
                   <select id="learnSide"><option value="buy">Achat (Long)</option><option value="sell">Vente (Short)</option></select>
                 </label>
                 <label>Type d'ordre
-                  <select id="learnOrderType" onchange="$('#learnLimitWrap').classList.toggle('hidden', this.value!=='limit');">
+                  <select id="learnOrderType">
                     <option value="market">Marché (Market)</option>
                     <option value="limit">Limite (Limit Order)</option>
                   </select>
@@ -519,12 +563,12 @@
         </div>
         <p class="muted small">Posez une question sur votre portefeuille virtuel, un indicateur technique ou demandez une explication détaillée.</p>
         <div class="landing-examples" style="justify-content:flex-start;margin:8px 0 12px;">
-          <button type="button" class="chip-example" onclick="askLearnPrompt('Analyse la santé et la rentabilité de mon portefeuille démo')">📊 Analyser mon portefeuille</button>
-          <button type="button" class="chip-example" onclick="askLearnPrompt('Comment utiliser les ordres limites pour minimiser mes risques ?')">🛡️ Gérer le risque</button>
-          <button type="button" class="chip-example" onclick="askLearnPrompt('Explique-moi la différence entre un ordre Market et un ordre Limit')">⚖️ Market vs Limit</button>
-          <button type="button" class="chip-example" onclick="askLearnPrompt('C\'est quoi le spread et comment impacte-t-il les gains ?')">💡 Qu'est-ce que le spread ?</button>
+          <button type="button" class="chip-example" data-learn-prompt="Analyse la santé et la rentabilité de mon portefeuille démo">📊 Analyser mon portefeuille</button>
+          <button type="button" class="chip-example" data-learn-prompt="Comment utiliser les ordres limites pour minimiser mes risques ?">🛡️ Gérer le risque</button>
+          <button type="button" class="chip-example" data-learn-prompt="Explique-moi la différence entre un ordre Market et un ordre Limit">⚖️ Market vs Limit</button>
+          <button type="button" class="chip-example" data-learn-prompt="C'est quoi le spread et comment impacte-t-il les gains ?">💡 Qu'est-ce que le spread ?</button>
         </div>
-        <form id="learnAskForm" class="profile-form" onsubmit="event.preventDefault(); askLearn();" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <form id="learnAskForm" style="display:flex;gap:8px;flex-wrap:wrap;">
           <input type="text" id="learnAsk" placeholder="Ex: Que penses-tu de ma diversification ?" style="flex:1;min-width:220px;padding:10px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--brd);color:var(--txt);">
           <button class="primary" type="submit" style="padding:10px 18px;white-space:nowrap;">💬 Demander à l'IA</button>
         </form>
@@ -646,7 +690,7 @@
       <p id="medTrialUrl"></p>
     </div>
     <div class="no-print" style="margin-top: 14px; display: flex; gap: 8px;">
-      <button class="btn" type="button" onclick="window.print()" style="flex:1;">🖨️ Imprimer / Exporter PDF</button>
+      <button class="btn" type="button" id="btnPrintMedical" style="flex:1;">🖨️ Imprimer / Exporter PDF</button>
     </div>
     <div class="no-print" style="margin-top: 12px;">
       <textarea id="medCaseSummary" rows="2" placeholder="Cas anonymisé pour mise en relation avec le centre investigateurs..."></textarea>
@@ -669,19 +713,33 @@
         <strong id="betOutcomeBadge" style="font-size:1.05rem;"></strong>
       </div>
       <div style="display:flex;justify-content:space-between;">
-        <span class="muted">Prix unitaire par part :</span>
+        <span class="muted">Prix unitaire (CLOB) :</span>
         <strong id="betPriceDisplay"></strong>
       </div>
+      <p id="betPriceSource" class="muted small" style="margin:8px 0 0;"></p>
     </div>
-    <form id="betForm" onsubmit="event.preventDefault(); submitBet();">
+    <div id="betOrderBook" class="poly-orderbook" style="display:none;margin:0 0 12px;">
+      <div class="muted small" style="margin-bottom:6px;">Carnet d'ordres (CLOB)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div>
+          <div class="muted small" style="color:#10B981;">Bids</div>
+          <div id="betBids" class="poly-book-side"></div>
+        </div>
+        <div>
+          <div class="muted small" style="color:#EF4444;">Asks</div>
+          <div id="betAsks" class="poly-book-side"></div>
+        </div>
+      </div>
+    </div>
+    <form id="betForm">
       <label style="display:block;margin-bottom:6px;font-size:0.9rem;color:var(--txt);">Montant virtuel à miser ($)
         <div style="display:flex;gap:6px;margin:6px 0;">
-          <button type="button" class="chip-example" onclick="$('#betAmount').value=10; updateBetPayout();">$10</button>
-          <button type="button" class="chip-example" onclick="$('#betAmount').value=50; updateBetPayout();">$50</button>
-          <button type="button" class="chip-example" onclick="$('#betAmount').value=100; updateBetPayout();">$100</button>
-          <button type="button" class="chip-example" onclick="$('#betAmount').value=500; updateBetPayout();">$500</button>
+          <button type="button" class="chip-example" data-amount-preset="#betAmount" data-amount-value="10">$10</button>
+          <button type="button" class="chip-example" data-amount-preset="#betAmount" data-amount-value="50">$50</button>
+          <button type="button" class="chip-example" data-amount-preset="#betAmount" data-amount-value="100">$100</button>
+          <button type="button" class="chip-example" data-amount-preset="#betAmount" data-amount-value="500">$500</button>
         </div>
-        <input type="number" id="betAmount" value="50" min="1" step="1" required oninput="updateBetPayout();" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);font-size:1.1rem;font-weight:700;">
+        <input type="number" id="betAmount" value="50" min="1" step="1" required style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);font-size:1.1rem;font-weight:700;">
       </label>
       <div style="background:var(--panel-soft);border:1px solid var(--brd);border-radius:10px;padding:10px;margin:12px 0;display:flex;justify-content:space-between;align-items:center;">
         <span class="muted small">Gain potentiel si OUI/NON valide :</span>
@@ -704,7 +762,7 @@
       Continuer avec Google
     </button>
     <div class="login-divider"><span>ou</span></div>
-    <form id="emailLoginForm" onsubmit="event.preventDefault();">
+    <form id="emailLoginForm">
       <input type="email" id="loginEmail" placeholder="Email" required>
       <input type="password" id="loginPassword" placeholder="Mot de passe" required>
       <button class="primary" type="submit" style="width:100%">Se connecter</button>
@@ -715,6 +773,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>
