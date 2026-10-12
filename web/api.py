@@ -170,6 +170,38 @@ def create_router(store: Store) -> APIRouter:
     async def agents():
         return Orchestrator.available_agents()
 
+    @router.get("/news/digest")
+    async def news_digest(limit: int = 20, offset: int = 0, category: str = None):
+        limit = max(1, min(int(limit), 50))
+        offset = max(0, int(offset))
+        items = store.get_news_topics(limit=limit, offset=offset, category=category)
+        return {"items": items, "total": store.count_news_topics(category=category)}
+
+    @router.get("/news/topics/{topic_id}")
+    async def news_topic_detail(topic_id: int):
+        topic = store.get_news_topic(topic_id)
+        if not topic:
+            return JSONResponse({"error": "Sujet introuvable"}, status_code=404)
+        return topic
+
+    @router.post("/news/refresh")
+    async def news_refresh(request: Request, authorization: Optional[str] = Header(None)):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour actualiser."}, status_code=401)
+
+        async def _cycle():
+            from bot.news_digest import run_news_cycle
+            try:
+                await asyncio.to_thread(run_news_cycle, store)
+            except Exception as e:
+                log.exception("[news] cycle manuel en échec : %s", e)
+
+        asyncio.create_task(_cycle())
+        return {"status": "started"}
+
     @router.get("/runs")
     async def runs():
         rows = store.conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 20").fetchall()
