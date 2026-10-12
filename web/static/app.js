@@ -1100,7 +1100,8 @@ async function loadWatches() {
   }
 }
 
-async function createWatchFromForm() {
+async function createWatchFromForm(e) {
+  e?.preventDefault();
   const title = ($("#watchTitle")?.value || "").trim();
   if (!title) return;
   const body = {
@@ -1484,7 +1485,7 @@ function paintWatchDashboard(dash) {
   tbody.innerHTML = (dash.events || [])
     .map((e) => {
       const title = e.url
-        ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title)}</a>`
+        ? `<a href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener">${esc(e.title)}</a>`
         : esc(e.title);
       return `<tr>
         <td>${esc(e.event_type || "news")}</td>
@@ -1531,6 +1532,12 @@ function paintWatchDashboard(dash) {
 
 function kpi(v, label) {
   return `<div class="kpi"><b>${esc(String(v))}</b><span>${esc(label)}</span></div>`;
+}
+
+const _usdFmt = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "USD" });
+function fmtUsd(n) {
+  const num = Number(n);
+  return Number.isFinite(num) ? _usdFmt.format(num) : String(n);
 }
 
 /* --- tools legacy --- */
@@ -1580,7 +1587,7 @@ function renderOffers() {
   list.innerHTML = filtered
     .slice(0, 60)
     .map(
-      (o) => `<div class="card"><a href="${esc(o.url)}" target="_blank" rel="noopener"><strong>${esc(o.title)}</strong></a>
+      (o) => `<div class="card"><a href="${esc(safeUrl(o.url))}" target="_blank" rel="noopener"><strong>${esc(o.title)}</strong></a>
       <div class="muted small">${esc(o.provider)} · ${esc(o.offer_type)} · ${esc(o.credibility_tier || "")}</div>
       <p class="muted small">${esc((o.description || "").slice(0, 140))}</p></div>`
     )
@@ -1655,7 +1662,7 @@ async function loadMedicalRecords() {
       .map((r) => {
         const payload = encodeURIComponent(JSON.stringify(r));
         const badgeColor = r.status === "RECRUITING" ? "var(--accent)" : "var(--muted)";
-        return `<article class="discover-card" onclick="openMedicalModal('${payload}')">
+        return `<article class="discover-card" data-payload="${payload}">
           <div class="meta" style="display:flex;justify-content:space-between;">
             <span>${esc(r.source || "clinicaltrials")} · ${esc(r.country || "Afrique")}</span>
             <span style="color:${badgeColor};font-weight:600;">${esc(r.phase || r.status || "")}</span>
@@ -1666,6 +1673,9 @@ async function loadMedicalRecords() {
         </article>`;
       })
       .join("");
+    grid.querySelectorAll(".discover-card[data-payload]").forEach((card) => {
+      card.addEventListener("click", () => openMedicalModal(card.dataset.payload));
+    });
   } catch (_) {
     grid.innerHTML = '<p class="muted">Erreur lors de la récupération des données médicales.</p>';
   }
@@ -1708,7 +1718,7 @@ window.openMedicalModal = function (encoded) {
   $("#medLabName").textContent = record.sponsor ? `Investigateur / Sponsor : ${record.sponsor}` : "";
   $("#medCityCountry").textContent = record.city || record.country ? `Localisation : ${record.city || ""} ${record.country || ""}` : "";
   $("#medTrialUrl").innerHTML = record.url
-    ? `<a href="${esc(record.url)}" target="_blank" rel="noopener">Consulter l'essai officiel en ligne ↗</a>`
+    ? `<a href="${esc(safeUrl(record.url))}" target="_blank" rel="noopener">Consulter l'essai officiel en ligne ↗</a>`
     : "";
 };
 
@@ -1720,7 +1730,9 @@ async function generateMedicalEmail() {
       method: "POST",
       body: JSON.stringify({ case_summary: caseSummary }),
     });
-    if (res.mailto) window.open(res.mailto, "_blank");
+    // location.href plutôt que window.open("_blank") : évite un onglet vide
+    // lorsque le client mail prend le relais.
+    if (res.mailto) window.location.href = safeUrl(res.mailto);
   } catch (_) {}
 }
 
@@ -1738,7 +1750,8 @@ async function loadProfile() {
   } catch (_) {}
 }
 
-async function saveProfile() {
+async function saveProfile(e) {
+  e?.preventDefault();
   const body = {
     display_name: $("#pfName").value.trim(),
     skills: $("#pfSkills").value,
@@ -1774,6 +1787,45 @@ async function loadOppDigest() {
   }
 }
 
+/* --- Opportunités --- */
+async function loadOpportunitiesView() {
+  await loadOppDigest();
+  await loadOppGrid();
+}
+
+const OPP_TYPE_LABEL = {
+  job: "Emploi",
+  scholarship: "Bourse",
+  travel: "Voyage",
+  event: "Event",
+  news: "Actu",
+};
+
+function oppInitials(item) {
+  const base = (item.provider && item.provider !== "Inconnu" ? item.provider : item.title) || "?";
+  const words = String(base).replace(/[^\p{L}\p{N} ]/gu, " ").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+function oppImageBlock(item) {
+  const src = safeUrl(item.image_url || "");
+  const initials = esc(oppInitials(item));
+  const alt = esc(`Logo ou miniature — ${item.title || ""}`);
+  if (!src || src === "#") {
+    return `<div class="opp-thumb opp-thumb-fallback" aria-hidden="true">${initials}</div>`;
+  }
+  return `<img class="opp-thumb" src="${esc(src)}" alt="${alt}" loading="lazy"
+    referrerpolicy="no-referrer" decoding="async"
+    onerror="this.outerHTML='<div class=\\'opp-thumb opp-thumb-fallback\\' aria-hidden=\\'true\\'>${initials}</div>'">`;
+}
+
+function oppMetaLine(it) {
+  const provider = it.provider && it.provider !== "Google News" ? it.provider : (it.source || "");
+  return provider ? esc(provider) : "";
+}
+
 async function loadOppGrid() {
   const grid = $("#oppGrid");
   if (!grid) return;
@@ -1801,18 +1853,40 @@ async function loadOppGrid() {
     grid.innerHTML =
       items
         .map((it) => {
-          const meta = `${esc(it.offer_type || "")} · score ${esc(String(it.match_score ?? ""))}`;
-          return `<article class="discover-card" data-url="${esc(it.url || "")}">
-            <div class="meta">${meta}</div>
-            <h3>${esc(it.title || "")}</h3>
-            <p>${esc((it.description || "").slice(0, 160))}</p>
-            <p class="muted small">${esc(it.provider || it.source || "")}</p>
+          const payload = encodeURIComponent(JSON.stringify(it));
+          const typeLabel = OPP_TYPE_LABEL[it.offer_type] || it.offer_type || "Info";
+          const scoreBadge = Number.isFinite(Number(it.match_score))
+            ? `<span class="opp-score" title="Score de correspondance avec ton profil">${esc(String(Math.round(Number(it.match_score))))}</span>`
+            : "";
+          const title = esc(it.title || "");
+          const desc = esc(it.description || "");
+          const meta = oppMetaLine(it);
+          return `<article class="discover-card opp-card" data-payload="${payload}" tabindex="0" role="link" aria-label="${title}">
+            ${oppImageBlock(it)}
+            <div class="opp-body">
+              <h3 class="opp-title">${title}</h3>
+              ${desc ? `<p class="opp-desc">${desc}</p>` : ""}
+              <div class="opp-meta-row">
+                <span class="opp-type-badge">${esc(typeLabel)}</span>
+                <span class="opp-provider">${meta || "&nbsp;"}</span>
+                ${scoreBadge}
+              </div>
+            </div>
           </article>`;
         })
         .join("") || '<p class="muted">Aucune opportunité pour ces filtres.</p>';
-    grid.querySelectorAll(".discover-card").forEach((card) => {
+    grid.querySelectorAll(".opp-card").forEach((card) => {
       card.addEventListener("click", () => {
-        if (card.dataset.url) window.open(card.dataset.url, "_blank", "noopener");
+        try {
+          const it = JSON.parse(decodeURIComponent(card.dataset.payload));
+          openExternal(it.url);   // no-op si url vide/# → plus de nouvel onglet vers l'accueil
+        } catch (_) {}
+      });
+      card.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          card.click();
+        }
       });
     });
   } catch (_) {
