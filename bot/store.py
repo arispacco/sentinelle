@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS offers (
     keywords_json TEXT, found_at TEXT, first_seen TEXT, last_seen TEXT,
     expires_at TEXT, credibility_tier TEXT DEFAULT 'pending',
     credibility_score INTEGER DEFAULT 0, provenance_json TEXT DEFAULT '[]',
-    status TEXT DEFAULT 'new', vanished INTEGER DEFAULT 0
+    status TEXT DEFAULT 'new', vanished INTEGER DEFAULT 0,
+    image_url TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_offers_dna ON offers(dna_hash);
 CREATE INDEX IF NOT EXISTS idx_offers_status ON offers(status);
@@ -91,7 +92,8 @@ CREATE TABLE IF NOT EXISTS offers (
     keywords_json TEXT, found_at TEXT, first_seen TEXT, last_seen TEXT,
     expires_at TEXT, credibility_tier VARCHAR(50) DEFAULT 'pending',
     credibility_score INTEGER DEFAULT 0, provenance_json TEXT DEFAULT '[]',
-    status VARCHAR(50) DEFAULT 'new', vanished INTEGER DEFAULT 0
+    status VARCHAR(50) DEFAULT 'new', vanished INTEGER DEFAULT 0,
+    image_url TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pg_offers_dna ON offers(dna_hash);
 CREATE INDEX IF NOT EXISTS idx_pg_offers_status ON offers(status);
@@ -182,6 +184,18 @@ class Store:
                 self.conn.execute("ALTER TABLE alerts ADD COLUMN last_notified_at TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                self.conn.execute("ALTER TABLE offers ADD COLUMN image_url TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+        else:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.columns "
+                    "WHERE table_name='offers' AND column_name='image_url'"
+                )
+                if (cur.fetchone() or [0])[0] == 0:
+                    self.conn.execute("ALTER TABLE offers ADD COLUMN image_url TEXT DEFAULT ''")
 
     def _ensure_pg_conn(self):
         """Vérifie la liveness de la connexion PostgreSQL et reconnecte si nécessaire."""
@@ -247,17 +261,19 @@ class Store:
             """INSERT INTO offers (id,dna_hash,title,url,source,agent,provider,
                offer_type,network,description,keywords_json,found_at,first_seen,
                last_seen,expires_at,credibility_tier,credibility_score,
-               provenance_json,status,vanished)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               provenance_json,status,vanished,image_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  last_seen=excluded.last_seen,
                  provenance_json=excluded.provenance_json,
-                 description=excluded.description""",
+                 description=excluded.description,
+                 image_url=COALESCE(NULLIF(excluded.image_url,''), offers.image_url)""",
             (o.id, o.dna_hash, o.title, o.url, o.source, o.agent, o.provider,
              o.offer_type, o.network, o.description, json.dumps(o.keywords_matched),
              o.found_at, o.first_seen, o.last_seen, o.expires_at,
              o.credibility_tier, o.credibility_score,
-             json.dumps(o.provenance), o.status, o.vanished),
+             json.dumps(o.provenance), o.status, o.vanished,
+             getattr(o, "image_url", "") or ""),
         )
 
     def add_provenance(self, dna: str, source: str, url: str) -> None:
@@ -398,6 +414,10 @@ class Store:
         }
 
     def _row_to_offer(self, r) -> Offer:
+        try:
+            image_url = r["image_url"] or ""
+        except (KeyError, IndexError):
+            image_url = ""
         return Offer(
             id=r["id"], dna_hash=r["dna_hash"], title=r["title"], url=r["url"],
             source=r["source"], agent=r["agent"], provider=r["provider"],
@@ -408,6 +428,7 @@ class Store:
             credibility_score=r["credibility_score"],
             provenance=json.loads(r["provenance_json"] or "[]"),
             status=r["status"], vanished=r["vanished"],
+            image_url=image_url,
         )
 
     def add_alert(self, email: str, query: str, category: str, location: Optional[str] = None) -> int:
