@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from models import normalize_image_url, strip_cdata
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -34,9 +36,12 @@ class Offer:
     provenance: List[dict] = field(default_factory=list)  # [{source,url,found_at,alive}]
     status: str = "new"                # new/validated/shared/expired/rejected
     vanished: int = 0
-    image_url: str = ""
+    image_url: str = ""                # logo/miniature (http(s) uniquement, normalisée)
 
     def __post_init__(self):
+        self.title = strip_cdata(self.title)
+        self.description = strip_cdata(self.description)
+        self.image_url = normalize_image_url(self.image_url)
         if not self.id:
             self.id = hashlib.sha1(
                 f"{self.url}|{self.title.lower().strip()}".encode()

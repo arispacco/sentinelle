@@ -35,6 +35,7 @@ class BaseAgent:
             description=getattr(raw, "description", ""),
             keywords_matched=getattr(raw, "keywords_matched", []),
             found_at=getattr(raw, "found_at", ""),
+            image_url=getattr(raw, "image_url", ""),
         )
         o.dna_hash = offer_dna(o)
         o.expires_at = infer_expiry(f"{o.title} {o.description}", o.found_at)
