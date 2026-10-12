@@ -30,6 +30,8 @@ _RATE: Dict[str, list] = {}
 _RATE_LOCK = asyncio.Lock()
 _RATE_MAX = 120  # req / fenêtre
 _RATE_WINDOW = 60.0
+_ALERTS_RATE_MAX = 5
+_ALERTS_RATE_WINDOW = 60.0
 
 
 async def _rate_limit(request: Request, max_requests: int = _RATE_MAX, window: float = _RATE_WINDOW) -> Optional[JSONResponse]:
@@ -1127,10 +1129,16 @@ def create_router(store: Store) -> APIRouter:
 
     @router.get("/alerts")
     async def get_alerts():
-        return store.get_alerts()
+        return [
+            {k: v for k, v in alert.items() if k != "email"}
+            for alert in store.get_alerts()
+        ]
 
     @router.post("/alerts")
     async def create_alert(body: dict, request: Request, authorization: Optional[str] = Header(None)):
+        limited = await _rate_limit(request, max_requests=_ALERTS_RATE_MAX, window=_ALERTS_RATE_WINDOW)
+        if limited:
+            return limited
         user, err = await _unified_auth(request, authorization)
         if err:
             return err
