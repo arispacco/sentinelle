@@ -1588,3 +1588,172 @@ button:focus-visible,
   .btn-profile-save { width: 100%; }
 }
 
+/* ===================================================
+   CHAT — strip de sources façon Perplexity + « Afficher plus »
+   =================================================== */
+.chat-sources-strip {
+  margin-top: 14px;
+  border-top: 1px solid var(--brd);
+  padding-top: 12px;
+}
+.chat-strip-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 200px;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted-subtle) transparent;
+}
+.chat-src-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--panel-soft);
+  border: 1px solid var(--brd);
+  border-radius: 14px;
+  padding: 10px;
+  scroll-snap-align: start;
+  transition: border-color 150ms ease-out, transform 150ms ease-out,
+              box-shadow 150ms ease-out;
+}
+.chat-src-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.chat-src-thumb {
+  width: 100%;
+  height: 72px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--panel-soft);
+  border: 1px solid var(--brd);
+}
+.chat-src-fallback {
+  width: 100%;
+  height: 72px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--panel), var(--bg2));
+  border: 1px solid var(--brd);
+  color: var(--accent2);
+  font-family: var(--display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  user-select: none;
+}
+.chat-src-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--txt);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.chat-src-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-more-wrap {
+  margin-top: 10px;
+}
+.chat-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--brd);
+  background: transparent;
+  color: var(--txt);
+  border-radius: 999px;
+  padding: 7px 15px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: background 150ms ease-out, border-color 150ms ease-out,
+              color 150ms ease-out;
+}
+.chat-more-toggle:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chat-more-toggle .chevron {
+  display: inline-block;
+  transition: transform 200ms ease-out;
+  font-size: 0.72rem;
+}
+.chat-more-toggle.open .chevron { transform: rotate(180deg); }
+.chat-more-details {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.chat-more-details[hidden] { display: none; }
+.chat-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--panel-soft);
+  border: 1px solid var(--brd);
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 150ms ease-out;
+}
+.chat-detail-row:hover { border-color: var(--accent); }
+.chat-detail-row .chat-src-title { -webkit-line-clamp: unset; }
+.chat-detail-row .chat-src-desc {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.chat-news-link {
+  appearance: none;
+  margin-top: 6px;
+  align-self: flex-start;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.chat-news-link:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.chat-src-ext {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .chat-strip-track { grid-auto-columns: 168px; }
+}
+
+
