@@ -18,6 +18,12 @@ def _offer_blob(o) -> str:
     ]).lower()
 
 
+def _clean(o) -> str:
+    """Description nettoyée (boilerplate dédupliqué) prête pour la carte."""
+    from normalizer import clean_description
+    return clean_description(getattr(o, "description", "") or "", max_len=320)
+
+
 def score_offer(o, profile: dict, filters: Optional[dict] = None) -> float:
     filters = filters or {}
     blob = _offer_blob(o)
@@ -62,6 +68,7 @@ def offer_to_item(o, score: float = 0.0) -> dict:
             "offer_type": getattr(o, "offer_type", ""),
             "description": getattr(o, "description", ""),
             "keywords_matched": getattr(o, "keywords_matched", []) or [],
+            "image_url": getattr(o, "image_url", ""),
         }
     return {
         "title": raw.get("title"),
@@ -69,8 +76,9 @@ def offer_to_item(o, score: float = 0.0) -> dict:
         "source": raw.get("source"),
         "provider": raw.get("provider"),
         "offer_type": raw.get("offer_type"),
-        "description": raw.get("description"),
+        "description": _clean(o),
         "keywords_matched": raw.get("keywords_matched") or [],
+        "image_url": raw.get("image_url") or getattr(o, "image_url", "") or "",
         "match_score": round(score, 2),
     }
 
@@ -140,7 +148,15 @@ def collect_opportunities(
         scored.append((sc, o))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [offer_to_item(o, sc) for sc, o in scored[:limit]]
+    items = [offer_to_item(o, sc) for sc, o in scored[:limit]]
+    # Enrichissement og:image des items sans vignette (cache en base via Store).
+    try:
+        from bot.og_image import enrich_with_og_images
+        from bot.store import Store
+        enrich_with_og_images(items, store=Store())
+    except Exception as e_img:
+        log.debug("[opportunities] enrichissement og:image échoué : %s", e_img)
+    return items
 
 
 def feed_for_profile(limit: int = 20) -> List[dict]:

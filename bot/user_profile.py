@@ -108,3 +108,12 @@ def get_profile_store() -> UserProfileStore:
     if _profile is None:
         _profile = UserProfileStore()
     return _profile
+
+
+def image_store():
+    """Store partagé (bot v2) pour le cache og:image ; None si indisponible."""
+    try:
+        from bot.store import Store
+        return Store()
+    except Exception:
+        return None
