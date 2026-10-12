@@ -85,10 +85,10 @@ def send_smtp_email(to_email: str, subject: str, body_text: str, body_html: str 
     """Envoie un email via SMTP si les variables d'environnement SMTP sont configurées.
     
     Variables attendues dans le .env :
-    - SMTP_SERVER (ex: smtp.gmail.com)
+    - SMTP_HOST ou SMTP_SERVER (ex: smtp.gmail.com)
     - SMTP_PORT (ex: 587)
-    - SMTP_USERNAME
-    - SMTP_PASSWORD
+    - SMTP_USER ou SMTP_USERNAME
+    - SMTP_PASS ou SMTP_PASSWORD
     - SMTP_FROM
     """
     import os
@@ -97,10 +97,10 @@ def send_smtp_email(to_email: str, subject: str, body_text: str, body_html: str 
     from email.mime.text import MIMEText
     import logging
 
-    server = os.getenv("SMTP_SERVER")
+    server = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER")
     port = os.getenv("SMTP_PORT")
-    username = os.getenv("SMTP_USERNAME")
-    password = os.getenv("SMTP_PASSWORD")
+    username = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME")
+    password = os.getenv("SMTP_PASS") or os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_FROM", username)
     
     if not (server and port and username and password):
