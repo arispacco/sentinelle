@@ -896,14 +896,32 @@ button:focus-visible,
     top: 0;
     bottom: 0;
     width: 280px;
+    height: 100dvh;
+    max-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     z-index: 1000;
     transform: translateX(-105%);
     transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 4px 0 30px rgba(0, 0, 0, 0.4);
     background: var(--bg2);
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   }
   .sidebar.open {
     transform: translateX(0);
+  }
+  /* Drawer mobile : nav + historique scrollent ensemble, foot épinglé en bas */
+  .sidebar-history {
+    flex: 1 1 auto;
+    min-height: 60px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar-foot {
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
   }
   .btn-icon {
     display: inline-flex;
@@ -1053,6 +1071,21 @@ button:focus-visible,
     max-width: 96% !important;
     padding: 18px 14px;
     border-radius: 16px;
+  }
+}
+
+/* ---- Sidebar : fallback viewports très courts ---- */
+/* Si la hauteur manque, la sidebar entière devient scrollable MAIS le foot
+   reste visible en permanence grâce à position:sticky bottom. */
+@media (max-height: 560px) {
+  .sidebar,
+  .sidebar.drawer-open {
+    overflow-y: auto;
+  }
+  .sidebar-history {
+    flex: 0 0 auto;
+    min-height: 80px;
+    overflow-y: visible;
   }
 }
 
@@ -1457,4 +1490,101 @@ button:focus-visible,
   }
 }
 
+/* ===================================================
+   PAGE « MON PROFIL » — design system
+   Carte centrée, labels au-dessus des champs, grille responsive,
+   focus ring accent. Fonctionne en dark & light via tokens.
+   =================================================== */
+.profile-card {
+  max-width: 720px;
+  margin: 28px auto;
+  padding: 32px;
+  background: var(--bg2);
+  border: 1px solid var(--brd);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+.profile-head h2 {
+  font-family: var(--display);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+  color: var(--txt);
+}
+.profile-head p {
+  margin: 0 0 24px;
+  font-size: 0.92rem;
+}
+.profile-form {
+  display: flex;
+  flex-direction: column;
+}
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 20px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.field-span-2 { grid-column: span 2; }
+.field-label {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+.field input,
+.field select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--brd);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--txt);
+  font: inherit;
+  transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.field input::placeholder { color: var(--muted-subtle); }
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 26px;
+}
+.btn-profile-save {
+  min-height: 44px;
+  padding: 11px 26px;
+  border-radius: 999px;
+  font-weight: 650;
+  transition: transform 120ms ease-out, filter 150ms ease-out;
+}
+.btn-profile-save:hover { filter: brightness(1.06); }
+.btn-profile-save:active { transform: scale(0.98); }
+.profile-saved-msg { margin: 0; }
+
+@media (max-width: 640px) {
+  .profile-card {
+    margin: 16px auto;
+    padding: 22px 18px;
+    border-radius: 16px;
+  }
+  .profile-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .field-span-2 { grid-column: auto; }
+  .profile-actions { flex-direction: column; align-items: stretch; }
+  .btn-profile-save { width: 100%; }
+}
 
