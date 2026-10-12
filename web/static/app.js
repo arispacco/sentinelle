@@ -942,28 +942,134 @@ function startNewsPolling() {
   }, 60000);
 }
 
+function srcInitials(s) {
+  const base = s.source || s.provider || s.title || "?";
+  const words = String(base).replace(/[^\p{L}\p{N} ]/gu, " ").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "?";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+// Vignette image si fournie, sinon fallback initiale du média sur fond token.
+function chatSourceThumb(s) {
+  const img = safeUrl(s.image || "");
+  const initials = esc(srcInitials(s));
+  const alt = esc(`Vignette — ${s.source || s.provider || s.title || "source"}`);
+  if (!img || img === "#") {
+    return `<div class="chat-src-fallback" aria-hidden="true">${initials}</div>`;
+  }
+  return `<img class="chat-src-thumb" src="${esc(img)}" alt="${alt}" loading="lazy"
+    referrerpolicy="no-referrer" decoding="async">`;
+}
+
+// Strip de sources façon Perplexity : cartes horizontales scrollables + bouton
+// « Afficher plus » qui révèle la liste détaillée. Code défensif : champs absents OK.
+function renderChatSources(sources) {
+  const strip = document.createElement("div");
+  strip.className = "chat-sources-strip";
+
+  const track = document.createElement("div");
+  track.className = "chat-strip-track";
+
+  for (const s of sources.slice(0, 12)) {
+    const url = safeUrl(s.url);
+    const hasTopic = s.topic_id != null && s.topic_id !== "";
+    if ((!url || url === "#") && !hasTopic) continue;
+
+    const card = document.createElement(hasTopic ? "div" : "a");
+    card.className = "chat-src-card";
+    if (!hasTopic) {
+      card.href = url;
+      card.target = "_blank";
+      card.rel = "noopener";
+    }
+    card.innerHTML =
+      chatSourceThumb(s) +
+      `<span class="chat-src-title">${esc(s.title || url || "Source")}</span>` +
+      `<span class="chat-src-name">${esc(s.source || s.provider || "source")}</span>` +
+      (hasTopic
+        ? `<button type="button" class="chat-news-link" data-topic-id="${esc(String(s.topic_id))}">Lire dans Actualités</button>`
+        : "");
+    if (hasTopic) {
+      const btn = card.querySelector(".chat-news-link");
+      if (btn) {
+        btn.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openNewsFromChat(s.topic_id);
+        });
+      }
+      if (url && url !== "#") {
+        card.style.cursor = "pointer";
+        card.addEventListener("click", (ev) => {
+          if (ev.target.closest(".chat-news-link")) return;
+          window.open(url, "_blank", "noopener");
+        });
+      }
+    }
+    track.appendChild(card);
+  }
+  strip.appendChild(track);
+
+  if (track.children.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-more-wrap";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "chat-more-toggle";
+    toggle.innerHTML = `Afficher plus <span class="chevron">▾</span>`;
+    const details = document.createElement("div");
+    details.className = "chat-more-details";
+    details.hidden = true;
+    for (const s of sources) {
+      const url = safeUrl(s.url);
+      const hasTopic = s.topic_id != null && s.topic_id !== "";
+      if ((!url || url === "#") && !hasTopic) continue;
+      const row = document.createElement("div");
+      row.className = "chat-detail-row";
+      row.innerHTML =
+        `<span class="chat-src-title">${esc(s.title || url || "Source")}</span>` +
+        (s.description ? `<span class="chat-src-desc">${esc(String(s.description).slice(0, 200))}</span>` : "") +
+        `<span class="chat-src-name">${esc(s.source || s.provider || "source")}</span>` +
+        (hasTopic
+          ? `<button type="button" class="chat-news-link" data-topic-id="${esc(String(s.topic_id))}">Lire dans Actualités</button>`
+          : (url && url !== "#"
+            ? `<a class="chat-src-ext" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir</a>`
+            : ""));
+      if (hasTopic) {
+        const btn = row.querySelector(".chat-news-link");
+        if (btn) {
+          btn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            openNewsFromChat(s.topic_id);
+          });
+        }
+      }
+      details.appendChild(row);
+    }
+    toggle.addEventListener("click", () => {
+      const open = !details.hidden;
+      details.hidden = open;
+      toggle.classList.toggle("open", !open);
+      toggle.firstChild.textContent = open ? "Afficher plus " : "Afficher moins ";
+    });
+    wrap.appendChild(toggle);
+    wrap.appendChild(details);
+    strip.appendChild(wrap);
+  }
+  return strip;
+}
+
 function appendBubble(role, content, sources = []) {
   const box = $("#threadMessages");
   const el = document.createElement("div");
   el.className = "bubble " + (role === "user" ? "user" : "bot");
+  // Toujours passer par mdToHtml côté bot : listes, gras et liens cliquables garantis.
   let html = role === "user" ? esc(content) : mdToHtml(content);
-  if (sources && sources.length) {
-    html += `<div class="sources-grid">${sources
-      .slice(0, 12)
-      .map((s) => {
-        const title = esc(s.title || "");
-        const url = esc(s.url || "#");
-        const prov = esc(s.provider || s.offer_type || "source");
-        const desc = esc((s.description || "").slice(0, 120));
-        return `<a class="source-card" href="${url}" target="_blank" rel="noopener">
-          <div class="prov">${prov}</div>
-          <div class="ttl">${title}</div>
-          <div class="desc">${desc}</div>
-        </a>`;
-      })
-      .join("")}</div>`;
-  }
   el.innerHTML = html;
+  if (role !== "user" && Array.isArray(sources) && sources.length) {
+    el.appendChild(renderChatSources(sources));
+  }
   box.appendChild(el);
   box.scrollTop = box.scrollHeight;
 }
