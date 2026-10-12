@@ -694,6 +694,126 @@ async function ask(raw) {
   }
 }
 
+// Ouvre une URL externe dans un nouvel onglet — ne fait RIEN si l'URL est vide/#/interne.
+// (window.open("#") est ce qui provoquait l'ouverture d'un duplicata de l'accueil.)
+function openExternal(url) {
+  const safe = safeUrl(url);
+  if (!safe || safe === "#") return;
+  window.open(safe, "_blank", "noopener");
+}
+window.openExternal = openExternal;
+
+/* --- Espace Actualités : synthèses IA (veille 15 min) --- */
+function newsRelTime(iso) {
+  try {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return "à l'instant";
+    if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+    if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+    return `il y a ${Math.floor(s / 86400)} j`;
+  } catch (_) { return ""; }
+}
+
+function newsThumb(t) {
+  const img = safeUrl(t.image || "");
+  if (img && img !== "#") {
+    return `<img class="news-thumb" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer" decoding="async">`;
+  }
+  const first = (t.sources && t.sources[0] && (t.sources[0].source || t.sources[0].title)) || t.title || "?";
+  const initials = srcInitials({ source: first });
+  return `<div class="news-thumb-fallback" aria-hidden="true">${esc(initials)}</div>`;
+}
+
+function newsCardHtml(t) {
+  const ready = t.summary_status === "ready";
+  const extract = ready
+    ? esc(String(t.summary_md || "").replace(/[#*`\[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 220))
+    : "";
+  const status = ready
+    ? `<span class="badge-ia">✦ Synthèse IA</span>`
+    : `<span class="news-pending">Synthèse en cours…</span>`;
+  return `
+    ${newsThumb(t)}
+    <div class="news-body">
+      <h3>${esc(t.title || "Sujet en cours d'analyse")}</h3>
+      ${ready ? `<p class="news-extract">${extract}…</p>` : ""}
+      <div class="news-meta">
+        ${status}
+        <span>${esc(String(t.source_count ?? (t.sources ? t.sources.length : 0)))} sources</span>
+        <span>·</span>
+        <span>${esc(newsRelTime(t.first_seen || t.last_seen))}</span>
+      </div>
+    </div>`;
+}
+
+async function newsFetchPage(offset) {
+  const cat = state.news.category || "";
+  const q = cat ? `&category=${encodeURIComponent(cat)}` : "";
+  const res = await api(`/api/news/digest?limit=20&offset=${encodeURIComponent(offset)}${q}`);
+  if (res && res.error) throw new Error(res.error);
+  const items = Array.isArray(res.items) ? res.items : [];
+  return { items, total: Number(res.total ?? items.length) };
+}
+
+function renderNewsPage(items, { prepend = false } = {}) {
+  const list = $("#newsList");
+  if (!list) return;
+  const frag = document.createDocumentFragment();
+  for (const t of items) {
+    const card = document.createElement("article");
+    card.className = "news-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.dataset.topicId = String(t.id ?? "");
+    card.innerHTML = newsCardHtml(t);
+    card.addEventListener("click", () => openNewsArticle(t.id));
+    card.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openNewsArticle(t.id); }
+    });
+    frag.appendChild(card);
+  }
+  if (prepend) list.prepend(frag); else list.appendChild(frag);
+}
+
+async function loadNews({ reset = false } = {}) {
+  const list = $("#newsList");
+  if (!list || state.news.loading) return;
+  state.news.loading = true;
+  try {
+    if (reset) {
+      state.news.offset = 0;
+      list.innerHTML = "";
+    }
+    const { items, total } = await newsFetchPage(state.news.offset);
+    state.news.total = total;
+    const fresh = state.news.knownIds === null
+      ? items
+      : items.filter((t) => !state.news.knownIds.has(String(t.id)));
+    if (state.news.knownIds === null) state.news.knownIds = new Set();
+    for (const t of items) state.news.knownIds.add(String(t.id));
+    renderNewsPage(items);
+    state.news.offset += items.length;
+    if (!list.children.length) {
+      list.innerHTML = '<p class="muted" style="text-align:center;padding:30px 0;">Aucune actualité pour l\'instant — la première veille arrive dans ~15 minutes.</p>';
+    }
+    if (reset && fresh.length && state.news.items.length) {
+      const banner = $("#newsBanner");
+      if (banner) {
+        banner.classList.remove("hidden");
+        $("#btnNewsBanner").textContent = `${fresh.length} nouveau${fresh.length > 1 ? "x" : ""} sujet${fresh.length > 1 ? "s" : ""} — afficher`;
+      }
+    }
+    state.news.items = reset ? items : state.news.items.concat(items);
+    setupNewsInfiniteScroll();
+  } catch (e) {
+    if (!$("#newsList").children.length) {
+      $("#newsList").innerHTML = '<p class="muted" style="text-align:center;padding:30px 0;">Actualités indisponibles pour le moment.</p>';
+    }
+  } finally {
+    state.news.loading = false;
+  }
+}
+
 function appendBubble(role, content, sources = []) {
   const box = $("#threadMessages");
   const el = document.createElement("div");
