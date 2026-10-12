@@ -647,6 +647,152 @@ button:focus-visible,
   font-weight: 700;
 }
 
+/* ---- Carte Opportunité redesignée (scoped #oppGrid) ---- */
+#oppGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 22px;                         /* respiration généreuse entre cartes */
+  padding-bottom: 8px;
+  align-items: stretch;
+}
+
+#oppGrid > p { grid-column: 1 / -1; }
+
+#oppGrid .discover-card.opp-card {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;                     /* padding interne confortable */
+  border-radius: 16px;
+  background: var(--bg2);
+  border: 1px solid var(--brd);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);   /* ombre ultra-diffuse */
+  transition: transform 200ms ease-out, border-color 200ms ease-out,
+              box-shadow 200ms ease-out;
+  overflow: hidden;
+}
+
+#oppGrid .opp-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
+
+/* Vignette image 48-64px, radius doux */
+.opp-thumb {
+  width: 60px;
+  height: 60px;
+  min-width: 60px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: var(--panel-soft);
+  border: 1px solid var(--brd);
+}
+
+/* Fallback initiales : jamais d'image cassée */
+.opp-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-soft);
+  color: var(--accent2);
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.opp-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;                          /* marges régulières titre/desc/méta */
+}
+
+.opp-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--txt);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;             /* titre clampé 2 lignes */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.opp-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;                  /* lisibilité de la description */
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;             /* description clampée 3 lignes (CSS) */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Une seule rangée méta condensée en tone secondaire */
+.opp-meta-row {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--muted-subtle);
+  min-height: 24px;
+  white-space: nowrap;
+}
+
+.opp-provider {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opp-type-badge {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent2);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+.opp-score {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--brd);
+  background: var(--panel-soft);
+  color: var(--muted-subtle);
+  font-weight: 700;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 680px) {
+  #oppGrid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 8px 12px 30px;
+  }
+  #oppGrid .discover-card.opp-card {
+    padding: 16px;
+    border-radius: 14px;
+  }
+  .tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
 }
 
 /* Prediction Bet Buttons on Cards */
