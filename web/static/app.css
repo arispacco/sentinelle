@@ -423,6 +423,93 @@ body {
 }
 .news-banner button:hover { background: var(--accent); color: var(--bg); }
 
+/* --- Article interne (détail d'une synthèse IA) --- */
+.news-article {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+.news-article .back {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.news-article .back:hover { text-decoration: underline; }
+.news-article h1 {
+  font-family: var(--display);
+  font-size: 1.65rem;
+  line-height: 1.25;
+  margin: 0 0 10px;
+}
+.news-article .article-meta {
+  color: var(--muted-subtle);
+  font-size: 0.85rem;
+  margin-bottom: 18px;
+}
+.news-article .article-body {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--txt);
+}
+.news-article .article-body ul,
+.news-article .article-body ol { padding-left: 22px; margin: 10px 0; }
+.news-article .article-body li { margin: 6px 0; }
+.news-article .article-body a { color: var(--accent); }
+.news-sources {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--brd);
+}
+.news-sources h3 {
+  font-size: 0.95rem;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.news-sources .src-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+}
+.news-sources .src-row img,
+.news-sources .src-row .chat-src-fallback {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+.news-sources .src-row .t {
+  color: var(--txt);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.news-sources .src-row .t:hover { color: var(--accent); }
+.news-sources .src-row .n {
+  display: block;
+  color: var(--muted-subtle);
+  font-size: 0.76rem;
+  margin-top: 2px;
+}
+.news-skeleton {
+  border-radius: var(--radius);
+  background: linear-gradient(100deg, var(--bg2) 40%, var(--panel-soft) 50%, var(--bg2) 60%);
+  background-size: 200% 100%;
+  animation: newsShimmer 1.4s infinite;
+  min-height: 96px;
+}
+@keyframes newsShimmer {
+  to { background-position: -200% 0; }
+}
+
 .discover-card {
   background: var(--bg2);
   border: 1px solid var(--brd);
@@ -510,6 +597,56 @@ body {
 .discover-card .read-link:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+/* ---- Focus visible accessible (design system) ---- */
+button:focus-visible,
+.tab:focus-visible,
+.opp-card:focus-visible,
+.chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* ---- Onglets : groupe de pills harmonisé (#oppTabs & co) ---- */
+.tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--brd);
+  border-radius: 999px;
+  padding: 4px;
+  margin-top: 14px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.tab {
+  appearance: none;
+  border: none;
+  background: transparent;           /* inactif = ghost */
+  color: var(--muted-subtle);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  line-height: 1;
+  min-height: 38px;                  /* zone tactile ≥36-40px */
+  padding: 9px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 150ms ease-out, color 150ms ease-out,
+              box-shadow 150ms ease-out, transform 150ms ease-out;
+}
+.tab:hover { color: var(--txt); background: var(--panel-soft); }
+.tab:active { transform: scale(0.97); }
+.tab.active {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;                       /* actif = rempli accent existant */
+  font-weight: 700;
+}
+
 }
 
 /* Prediction Bet Buttons on Cards */
