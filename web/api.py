@@ -235,7 +235,12 @@ def create_router(store: Store) -> APIRouter:
         return orch.status
 
     @router.post("/run")
-    async def run(body: dict = None):
+    async def run(body: dict = None, request: Request = None, authorization: Optional[str] = Header(None)):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour cette action."}, status_code=401)
         body = body or {}
         only = body.get("only")
 
@@ -422,12 +427,27 @@ def create_router(store: Store) -> APIRouter:
             }, status_code=200)
 
     @router.get("/chat/history")
-    async def chat_history_sessions(limit: int = 30):
+    async def chat_history_sessions(
+        request: Request, authorization: Optional[str] = Header(None), limit: int = 30
+    ):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise."}, status_code=401)
         from bot.chat_history import get_history_store
         return get_history_store().list_sessions(limit=limit)
 
     @router.get("/chat/history/{session_id}")
-    async def chat_history_session(session_id: str):
+    async def chat_history_session(
+        session_id: str, request: Request, authorization: Optional[str] = Header(None)
+    ):
+        # Les sessions ne sont pas encore cloisonnées par utilisateur.
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise."}, status_code=401)
         from bot.chat_history import get_history_store
         return {"session_id": session_id, "turns": get_history_store().get_session(session_id)}
 
@@ -539,7 +559,14 @@ def create_router(store: Store) -> APIRouter:
         return store.dashboard(w["id"])
 
     @router.post("/watches/{slug}/refresh")
-    async def refresh_watch_endpoint(slug: str):
+    async def refresh_watch_endpoint(
+        slug: str, request: Request, authorization: Optional[str] = Header(None)
+    ):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour cette action."}, status_code=401)
         from bot.watch_store import get_watch_store
         from bot.watch_engine import refresh_watch
         store = get_watch_store()
@@ -550,7 +577,14 @@ def create_router(store: Store) -> APIRouter:
         return {"refresh": result, "dashboard": store.dashboard(w["id"])}
 
     @router.post("/watches/{slug}/analyze")
-    async def analyze_watch_endpoint(slug: str, body: dict = None):
+    async def analyze_watch_endpoint(
+        slug: str, body: dict = None, request: Request = None, authorization: Optional[str] = Header(None)
+    ):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour cette action."}, status_code=401)
         from bot.watch_store import get_watch_store
         from bot.watch_engine import generate_watch_insight
         body = body or {}
@@ -640,7 +674,14 @@ def create_router(store: Store) -> APIRouter:
         return get_profile_store().get()
 
     @router.put("/profile")
-    async def put_profile(body: dict):
+    async def put_profile(
+        body: dict, request: Request, authorization: Optional[str] = Header(None)
+    ):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour cette action."}, status_code=401)
         from bot.user_profile import get_profile_store
         return get_profile_store().update(body or {})
 
@@ -1157,7 +1198,14 @@ def create_router(store: Store) -> APIRouter:
         return {"id": alert_id, "status": "success"}
 
     @router.delete("/alerts/{alert_id}")
-    async def delete_alert(alert_id: int):
+    async def delete_alert(
+        alert_id: int, request: Request, authorization: Optional[str] = Header(None)
+    ):
+        user, err = await _unified_auth(request, authorization)
+        if err:
+            return err
+        if not user:
+            return JSONResponse({"error": "Authentification requise pour cette action."}, status_code=401)
         store.delete_alert(alert_id)
         return {"status": "deleted"}
 

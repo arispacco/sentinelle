@@ -5,6 +5,8 @@ import os
 import unittest
 
 os.environ["SENTINELLE_DISABLE_SCHEDULER"] = "1"
+os.environ["MEDICAL_AUTH_OPTIONAL"] = "1"
+os.environ["MEDICAL_AUTH_SECRET"] = "test-secret"
 
 from fastapi.testclient import TestClient
 

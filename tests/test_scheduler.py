@@ -4,6 +4,9 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+
+os.environ.setdefault("MEDICAL_AUTH_OPTIONAL", "1")
+os.environ.setdefault("MEDICAL_AUTH_SECRET", "test-secret")
 from pathlib import Path
 from unittest import mock
 

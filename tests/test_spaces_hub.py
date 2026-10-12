@@ -101,7 +101,7 @@ class TestSpacesApi(unittest.TestCase):
 
     def test_history(self):
         self.client.post("/api/chat", json={"message": "salut", "session_id": "hist1"}, headers=self.headers)
-        r = self.client.get("/api/chat/history")
+        r = self.client.get("/api/chat/history", headers=self.headers)
         self.assertEqual(r.status_code, 200)
         self.assertTrue(any(s["session_id"] == "hist1" for s in r.json()))
 

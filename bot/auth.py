@@ -17,9 +17,22 @@ from bot.config import DATA_DIR
 log = logging.getLogger(__name__)
 
 AUTH_DB = DATA_DIR / "auth.db"
+_SECRET_INSECURE_DEFAULTS = ("", "change-me-in-production")
 SECRET = os.getenv("MEDICAL_AUTH_SECRET", "change-me-in-production")
 TTL_HOURS = int(os.getenv("JWT_TTL_HOURS", "72"))
-AUTH_OPTIONAL = os.getenv("MEDICAL_AUTH_OPTIONAL", "1") == "1"
+AUTH_OPTIONAL = os.getenv("MEDICAL_AUTH_OPTIONAL", "0") == "1"
+
+if SECRET in _SECRET_INSECURE_DEFAULTS:
+    if AUTH_OPTIONAL:
+        log.warning(
+            "[auth] MEDICAL_AUTH_SECRET absent ou par défaut : JWT signés avec une clé "
+            "publiquement connue. À réserver au développement local."
+        )
+    else:
+        raise RuntimeError(
+            "MEDICAL_AUTH_SECRET manquant ou par défaut en mode auth obligatoire : "
+            "définissez un secret fort avant de lancer l'application."
+        )
 
 
 def _b64url(data: bytes) -> str:

@@ -85,7 +85,10 @@ class TestProfileOppApi(unittest.TestCase):
         up._profile = self.store
         from web.server import create_app
         from fastapi.testclient import TestClient
+        from bot.auth import create_token
         self.client = TestClient(create_app())
+        token = create_token({"sub": "tester@sentinelle.ai", "uid": "t1"})
+        self.headers = {"Authorization": f"Bearer {token}"}
 
     def tearDown(self):
         import bot.user_profile as up
@@ -101,7 +104,7 @@ class TestProfileOppApi(unittest.TestCase):
             "country": "Cameroun",
             "interests": ["tech"],
             "trading_level": "beginner",
-        })
+        }, headers=self.headers)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["display_name"], "Aristide")
         g = self.client.get("/api/profile")

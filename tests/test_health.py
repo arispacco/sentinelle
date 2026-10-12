@@ -1,6 +1,10 @@
 import os
 import tempfile
 import unittest
+
+os.environ.setdefault("MEDICAL_AUTH_OPTIONAL", "1")
+os.environ.setdefault("MEDICAL_AUTH_SECRET", "test-secret")
+os.environ.setdefault("SENTINELLE_DISABLE_SCHEDULER", "1")
 from unittest import mock
 
 
