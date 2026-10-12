@@ -1,87 +1,81 @@
-"""Scraper probabilités d'événements via Polymarket Gamma API."""
+"""Marchés de prédiction via Polymarket (Gamma + CLOB)."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import List, Optional
 
-import requests
-
 from bot.models import Offer
-from config import DEFAULT_HEADERS, REQUEST_TIMEOUT
 from scrapers.base import BaseScraper
+from scrapers.polymarket_client import PolymarketClient, get_polymarket_client
 
 log = logging.getLogger(__name__)
-
-GAMMA_MARKETS = "https://gamma-api.polymarket.com/markets"
 
 
 class PredictionsScraper(BaseScraper):
     name = "predictions"
 
-    def fetch_markets(self, limit: int = 30, query: Optional[str] = None) -> List[dict]:
-        params = {
-            "limit": limit,
-            "active": "true",
-            "closed": "false",
-            "order": "volume24hr",
-            "ascending": "false",
-        }
-        if query:
-            params["query"] = query
-        try:
-            resp = requests.get(GAMMA_MARKETS, params=params, headers=DEFAULT_HEADERS, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, list) else data.get("markets", data.get("data", []))
-        except Exception as e:
-            log.warning("[predictions] Polymarket échec : %s", e)
-            return []
+    def __init__(self, client: Optional[PolymarketClient] = None, session=None):
+        super().__init__(session=session)
+        self.client = client or get_polymarket_client()
 
-    @staticmethod
-    def _yes_probability(market: dict) -> Optional[float]:
-        prices = market.get("outcomePrices") or market.get("outcome_prices")
-        if isinstance(prices, str):
-            try:
-                prices = json.loads(prices)
-            except Exception:
-                prices = None
-        if isinstance(prices, list) and prices:
-            try:
-                return float(prices[0]) * 100.0
-            except (TypeError, ValueError):
-                return None
-        # fallback lastTradePrice
-        p = market.get("lastTradePrice")
-        if p is not None:
-            try:
-                return float(p) * 100.0
-            except (TypeError, ValueError):
-                return None
-        return None
+    def fetch_markets(self, limit: int = 30, query: Optional[str] = None) -> List[dict]:
+        return self.client.list_markets(limit=limit, query=query)
+
+    def markets_as_dicts(
+        self,
+        limit: int = 30,
+        query: Optional[str] = None,
+        include_clob_price: bool = False,
+    ) -> List[dict]:
+        raw = self.fetch_markets(limit=limit, query=query)
+        return [self.client.normalize_market(m, include_clob_price=include_clob_price) for m in raw]
+
+    def market_detail(self, market_id: str, with_history: bool = True, with_book: bool = True) -> Optional[dict]:
+        raw = self.client.get_market(market_id)
+        if not raw:
+            return None
+        detail = self.client.normalize_market(raw, include_clob_price=True)
+        yes_tok = detail.get("yes_token_id")
+        if with_history and yes_tok:
+            detail["price_history"] = self.client.get_prices_history(yes_tok, interval="1d", fidelity=60)
+        else:
+            detail["price_history"] = []
+        if with_book and yes_tok:
+            detail["order_book"] = self.client.get_book(yes_tok, depth=8)
+            detail["spread"] = self.client.get_spread(yes_tok)
+        else:
+            detail["order_book"] = {"bids": [], "asks": []}
+            detail["spread"] = None
+        if detail.get("condition_id"):
+            detail["clob_market"] = self.client.get_clob_market(detail["condition_id"])
+        return detail
 
     def run(self, query: Optional[str] = None) -> List[Offer]:
-        markets = self.fetch_markets(query=query)
+        markets = self.markets_as_dicts(limit=40, query=query, include_clob_price=False)
         out: List[Offer] = []
-        q = (query or "").lower().strip()
         for m in markets:
-            question = m.get("question") or m.get("title") or "Marché"
-            if q and q not in question.lower() and q not in (m.get("slug") or ""):
-                continue
-            prob = self._yes_probability(m)
-            volume = m.get("volume24hr") or m.get("volume") or 0
-            slug = m.get("slug") or m.get("conditionId") or ""
-            img_url = m.get("image") or m.get("icon") or "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=700&auto=format&fit=crop&q=80"
-            prob_txt = f"{prob:.1f}% Oui" if prob is not None else "50.0% Oui"
-            desc = f"Probabilité : {prob_txt} · Volume : ${float(volume):,.0f} · Marché Polymarket"
+            yes = m.get("yes_price")
+            keywords = [
+                "prediction",
+                "polymarket",
+                f"prob:{(yes or 0.5) * 100:.1f}",
+                m.get("slug") or "",
+                f"market_id:{m.get('id') or ''}",
+                f"yes_price:{yes if yes is not None else ''}",
+                f"no_price:{m.get('no_price') if m.get('no_price') is not None else ''}",
+            ]
+            if m.get("yes_token_id"):
+                keywords.append(f"yes_token:{m['yes_token_id']}")
+            if m.get("no_token_id"):
+                keywords.append(f"no_token:{m['no_token_id']}")
             out.append(Offer(
-                title=question,
-                url=url,
+                title=m["title"],
+                url=m["url"],
                 source="polymarket",
                 provider="Polymarket",
                 offer_type="prediction",
-                description=desc,
-                keywords_matched=["prediction", "polymarket", f"prob:{prob or 50:.1f}", slug],
-                image_url=img_url,
+                description=m["description"],
+                keywords_matched=[k for k in keywords if k],
+                image_url=m.get("image_url") or "",
             ))
         return out[:40]
