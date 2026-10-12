@@ -9,64 +9,98 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
-from models import Offer
+from models import Offer, strip_cdata
 from scrapers.base import BaseScraper
 
 log = logging.getLogger(__name__)
+
+# Timeouts courts : un flux qui traîne est abandonné, pas bloquant.
+FEED_TIMEOUT = 5
+
+# Parser XML (lxml) : lit correctement <link> (html.parser la traite comme
+# balise void et renvoie un texte vide) et gère nativement les CDATA.
+SOUP_FEATURES = "xml"
 
 NEWS_SOURCES = {
     "top": {
         "name": "Top Actu",
         "urls": [
-            "https://www.francetvinfo.fr/titres.rss",
-            "https://www.lefigaro.fr/rss/figaro_actualites.xml",
-            "https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.francetvinfo.fr/titres.rss", "France Info"),
+            ("https://www.lefigaro.fr/rss/figaro_flash-actu.xml", "Le Figaro"),
+            ("https://www.lemonde.fr/rss/une.xml", "Le Monde"),
+            ("https://feeds.bbci.co.uk/news/world/rss.xml", "BBC World"),
+            ("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera"),
+            ("https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
     "tech": {
         "name": "Actu Tech",
         "urls": [
-            "https://www.clubic.com/feed/news.rss",
-            "https://www.01net.com/actualites/feed/",
-            "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.clubic.com/feed/news.rss", "Clubic"),
+            ("https://www.01net.com/actualites/feed/", "01Net"),
+            ("https://techcrunch.com/feed/", "TechCrunch"),
+            ("https://feeds.arstechnica.com/arstechnica/index/", "Ars Technica"),
+            ("https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
     "sport": {
         "name": "Actu Sport",
         "urls": [
-            "https://www.francetvinfo.fr/sports.rss",
-            "https://www.lequipe.fr/rss/actu_rss.xml",
-            "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.francetvinfo.fr/sports.rss", "France Info"),
+            ("https://news.google.com/rss/headlines/section/topic/SPORTS?hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
     "finance": {
         "name": "Actu Finance",
         "urls": [
-            "https://www.francetvinfo.fr/economie.rss",
-            "https://services.lesechos.fr/rss/les-echos-economie.xml",
-            "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.bfmtv.com/rss/economie/", "BFM Business"),
+            ("https://www.challenges.fr/rss.xml", "Challenges"),
+            ("https://www.theguardian.com/uk/business/rss", "The Guardian"),
+            ("https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
     "politic": {
         "name": "Actu Politique",
         "urls": [
-            "https://www.francetvinfo.fr/politique.rss",
-            "https://news.google.com/rss/search?q=politique&hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.francetvinfo.fr/politique.rss", "France Info"),
+            ("https://www.lefigaro.fr/rss/figaro_politique.xml", "Le Figaro"),
+            ("https://news.google.com/rss/search?q=politique&hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
     "economie": {
         "name": "Actu Économie",
         "urls": [
-            "https://www.francetvinfo.fr/economie.rss",
-            "https://services.lesechos.fr/rss/les-echos-economie.xml",
-            "https://news.google.com/rss/search?q=economie&hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.bfmtv.com/rss/economie/", "BFM Business"),
+            ("https://www.lemonde.fr/economie/rss_full.xml", "Le Monde"),
+            ("https://news.google.com/rss/search?q=economie&hl=fr&gl=FR&ceid=FR:fr", None),
+        ],
+    },
+    "afrique": {
+        "name": "Actu Afrique",
+        "urls": [
+            ("https://www.jeuneafrique.com/feed/", "Jeune Afrique"),
+            ("https://www.rfi.fr/fr/afrique/rss", "RFI"),
+            ("https://feeds.bbci.co.uk/afrique/rss.xml", "BBC Afrique"),
+            ("https://www.france24.com/fr/afrique/rss", "France 24"),
+            ("https://news.google.com/rss/search?q=Afrique+OR+Afrique+centrale+OR+Sahel&hl=fr&gl=FR&ceid=FR:fr", None),
+        ],
+    },
+    "international": {
+        "name": "Actu Internationale",
+        "urls": [
+            ("https://www.lemonde.fr/international/rss_full.xml", "Le Monde"),
+            ("https://www.lefigaro.fr/rss/figaro_international.xml", "Le Figaro"),
+            ("https://feeds.bbci.co.uk/news/world/rss.xml", "BBC World"),
+            ("https://news.google.com/rss/search?q=%22Courrier%20International%22&hl=fr&gl=FR&ceid=FR:fr", "Courrier International"),
+            ("https://www.aljazeera.com/xml/rss/all.xml", "Al Jazeera"),
         ],
     },
     "ia": {
         "name": "Actu IA",
         "urls": [
-            "https://www.clubic.com/feed/tag/intelligence-artificielle.rss",
-            "https://news.google.com/rss/search?q=intelligence+artificielle+OR+AI+OR+LLM&hl=fr&gl=FR&ceid=FR:fr",
+            ("https://www.clubic.com/feed/tag/intelligence-artificielle.rss", "Clubic"),
+            ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch"),
+            ("https://news.google.com/rss/search?q=intelligence+artificielle+OR+AI+OR+LLM&hl=fr&gl=FR&ceid=FR:fr", None),
         ],
     },
 }
@@ -78,6 +112,8 @@ CATEGORY_FALLBACK_IMAGES = {
     "finance": "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=700&auto=format&fit=crop&q=80",
     "politic": "https://images.unsplash.com/photo-1541872703-74c5e44368f9?w=700&auto=format&fit=crop&q=80",
     "economie": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=700&auto=format&fit=crop&q=80",
+    "afrique": "https://images.unsplash.com/photo-1516026672322-bc52d61a55d5?w=700&auto=format&fit=crop&q=80",
+    "international": "https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=700&auto=format&fit=crop&q=80",
     "ia": "https://images.unsplash.com/photo-1677442136019-21780efad99a?w=700&auto=format&fit=crop&q=80",
 }
 
@@ -124,55 +160,64 @@ class NewsScraper(BaseScraper):
             log.warning("[news] Catégorie inconnue : %s", category)
             return []
 
-        urls = cfg.get("urls") or [cfg.get("url")]
+        urls = cfg.get("urls") or []
         offers: List[Offer] = []
         seen_titles = set()
 
-        for url in urls:
-            if not url or len(offers) >= 20:
+        # Rotation : au plus 2 items consécutifs du même flux, pour garantir
+        # la diversité des médias quand un flux publie en rafale.
+        per_feed_quota: dict = {}
+        max_per_feed = 3
+
+        for entry in urls:
+            if len(offers) >= 20:
                 break
+            url, default_provider = (entry if isinstance(entry, tuple) else (entry, None))
             try:
-                xml_content = self.fetch_static(url)
+                xml_content = self.fetch_static(url, timeout=FEED_TIMEOUT)
                 if not xml_content:
                     continue
 
-                soup = BeautifulSoup(xml_content, "html.parser")
+                soup = BeautifulSoup(xml_content, SOUP_FEATURES)
                 items = soup.find_all("item")
 
                 for item in items:
                     if len(offers) >= 20:
                         break
+                    if per_feed_quota.get(url, 0) >= max_per_feed:
+                        break
 
-                    title = item.find("title").get_text() if item.find("title") else ""
-                    title = title.strip()
+                    raw_title = item.find("title").get_text() if item.find("title") else ""
+                    title = strip_cdata(raw_title)
                     if not title or title.lower() in seen_titles:
                         continue
                     seen_titles.add(title.lower())
 
                     link = item.find("link").get_text() if item.find("link") else ""
-                    
+
                     desc_raw = item.find("description").get_text() if item.find("description") else ""
                     desc_soup = BeautifulSoup(desc_raw, "html.parser")
-                    description = desc_soup.get_text().replace("&nbsp;", " ").strip()
+                    description = strip_cdata(desc_soup.get_text().replace("&nbsp;", " "))
 
                     # Déterminer le média
-                    provider = cfg["name"]
-                    if " - " in title:
+                    provider = default_provider or cfg["name"]
+                    if " - " in title and not default_provider:
                         parts = title.rsplit(" - ", 1)
-                        title = parts[0].strip()
-                        provider = parts[1].strip()
+                        title, provider = parts[0].strip(), parts[1].strip()
                     elif "francetvinfo" in url:
                         provider = "France Info"
                     elif "lefigaro" in url:
                         provider = "Le Figaro"
+                    elif "lemonde" in url:
+                        provider = "Le Monde"
                     elif "clubic" in url:
                         provider = "Clubic"
                     elif "01net" in url:
                         provider = "01Net"
-                    elif "lesechos" in url:
-                        provider = "Les Échos"
-                    elif "lequipe" in url:
-                        provider = "L'Équipe"
+                    elif "bfmtv" in url:
+                        provider = "BFM Business"
+                    elif "challenges.fr" in url:
+                        provider = "Challenges"
 
                     # Extraire l'image réelle
                     img_url = self._extract_image_from_item(item, desc_soup, category)
@@ -187,7 +232,9 @@ class NewsScraper(BaseScraper):
                         keywords_matched=[category],
                         image_url=img_url,
                     ))
+                    per_feed_quota[url] = per_feed_quota.get(url, 0) + 1
             except Exception as e:
+                # Flux en échec : on skippe silencieusement (log) et on continue.
                 log.warning("[news] Erreur sur flux %s: %s", url, e)
 
         return offers
