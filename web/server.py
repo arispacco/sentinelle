@@ -194,7 +194,16 @@ def create_app(store: Store = None) -> FastAPI:
         lifespan=lifespan,
     )
     # Le web a sa propre connexion (WAL) ; l'orchestrateur en aura une autre.
-    app.state.store = store or Store()
+    if store is not None:
+        app.state.store = store
+    else:
+        try:
+            app.state.store = Store()
+        except Exception as e:
+            import tempfile
+            fallback = Path(tempfile.gettempdir()) / "sentinelle-fallback.db"
+            log.error("[server] Store défaut indisponible (%s) — fallback %s", e, fallback)
+            app.state.store = Store(path=fallback)
     app.include_router(create_router(app.state.store))
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
