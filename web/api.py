@@ -109,7 +109,7 @@ class Broadcaster:
 def create_router(store: Store) -> APIRouter:
     router = APIRouter(prefix="/api")
     bc = Broadcaster()
-    orch = Orchestrator(store=Store(), on_progress=lambda **kw: bc.publish(kw))
+    orch = Orchestrator(store=store, on_progress=lambda **kw: bc.publish(kw))
 
     @router.get("/stats")
     async def stats():
