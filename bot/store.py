@@ -461,6 +461,103 @@ class Store:
             "backend": "postgresql" if self.use_pg else "sqlite",
         }
 
+    @staticmethod
+    def _row_to_topic(r) -> dict:
+        def _g(key, default=""):
+            try:
+                v = r[key]
+            except (KeyError, IndexError):
+                return default
+            return v if v is not None else default
+        return {
+            "id": _g("id"),
+            "signature": _g("signature"),
+            "title": _g("title"),
+            "summary_md": _g("summary_md"),
+            "summary_status": _g("summary_status", "pending"),
+            "image": _g("image"),
+            "first_seen": _g("first_seen"),
+            "last_seen": _g("last_seen"),
+            "source_count": _g("source_count", 0),
+            "category": _g("category"),
+            "sources": json.loads(_g("sources_json", "[]") or "[]"),
+        }
+
+    def upsert_news_topic(self, rec: dict) -> bool:
+        """Insère un sujet ou met à jour ses sources. True si le sujet est nouveau."""
+        now = datetime.now(timezone.utc).isoformat()
+        existing = self._query_one("SELECT id FROM news_topics WHERE signature = ?", (rec["signature"],))
+        if existing:
+            row = existing if isinstance(existing, dict) else {"id": existing[0]}
+            topic_id = row["id"]
+            self._execute(
+                "UPDATE news_topics SET last_seen=?, source_count=?, "
+                "sources_json=?, category=COALESCE(NULLIF(?, ''), category) WHERE id=?",
+                (now, rec.get("source_count", 0),
+                 json.dumps(rec.get("sources", []), ensure_ascii=False),
+                 rec.get("category", ""), topic_id),
+            )
+            return False
+        self._execute(
+            """INSERT INTO news_topics
+               (signature, title, summary_md, summary_status, sources_json,
+                image, first_seen, last_seen, source_count, category)
+               VALUES (?,?,NULL,'pending',?,?,?,?,?,?)""",
+            (rec["signature"], rec.get("title", ""),
+             json.dumps(rec.get("sources", []), ensure_ascii=False),
+             rec.get("image", ""), now, now,
+             rec.get("source_count", 0), rec.get("category", "")),
+        )
+        return True
+
+    def get_news_topics(self, limit: int = 20, offset: int = 0, category: str = None) -> list:
+        if category:
+            rows = self._query(
+                "SELECT * FROM news_topics WHERE category = ? "
+                "ORDER BY first_seen DESC LIMIT ? OFFSET ?",
+                (category, int(limit), int(offset)),
+            )
+        else:
+            rows = self._query(
+                "SELECT * FROM news_topics ORDER BY first_seen DESC LIMIT ? OFFSET ?",
+                (int(limit), int(offset)),
+            )
+        return [self._row_to_topic(r) for r in rows]
+
+    def count_news_topics(self, category: str = None) -> int:
+        if category:
+            row = self._query_one(
+                "SELECT COUNT(*) as c FROM news_topics WHERE category = ?",
+                (category,),
+            )
+        else:
+            row = self._query_one("SELECT COUNT(*) as c FROM news_topics")
+        return (row["c"] if row else 0) if isinstance(row, dict) else (row[0] if row else 0)
+
+    def get_news_topic(self, topic_id: int) -> Optional[dict]:
+        row = self._query_one("SELECT * FROM news_topics WHERE id = ?", (int(topic_id),))
+        return self._row_to_topic(row) if row else None
+
+    def get_pending_summary_topics(self, limit: int = 10) -> list:
+        rows = self._query(
+            "SELECT * FROM news_topics WHERE summary_status IN ('pending','pending_summary') "
+            "ORDER BY source_count DESC, first_seen DESC LIMIT ?",
+            (int(limit),),
+        )
+        return [self._row_to_topic(r) for r in rows]
+
+    def count_pending_summary_topics(self) -> int:
+        row = self._query_one(
+            "SELECT COUNT(*) as c FROM news_topics WHERE summary_status IN ('pending','pending_summary')"
+        )
+        return (row["c"] if row else 0) if isinstance(row, dict) else (row[0] if row else 0)
+
+    def update_news_topic_summary(self, topic_id: int, summary_md: str, status: str) -> None:
+        self._execute(
+            "UPDATE news_topics SET summary_md=?, summary_status=? WHERE id=?",
+            (summary_md, status, int(topic_id)),
+        )
+
     def _row_to_offer(self, r) -> Offer:
         try:
             image_url = r["image_url"] or ""
