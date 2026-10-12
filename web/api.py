@@ -30,13 +30,13 @@ _RATE_MAX = 120  # req / fenêtre
 _RATE_WINDOW = 60.0
 
 
-async def _rate_limit(request: Request) -> Optional[JSONResponse]:
-    """Rate limiter thread-safe avec asyncio.Lock."""
+async def _rate_limit(request: Request, max_requests: int = _RATE_MAX, window: float = _RATE_WINDOW) -> Optional[JSONResponse]:
+    """Rate limiter thread-safe avec asyncio.Lock (buckets par IP, fenêtre glissante)."""
     ip = request.client.host if request.client else "unknown"
     now = time.time()
     async with _RATE_LOCK:
-        bucket = [t for t in _RATE.get(ip, []) if now - t < _RATE_WINDOW]
-        if len(bucket) >= _RATE_MAX:
+        bucket = [t for t in _RATE.get(ip, []) if now - t < window]
+        if len(bucket) >= max_requests:
             return JSONResponse({"error": "Rate limit dépassé"}, status_code=429)
         bucket.append(now)
         _RATE[ip] = bucket
@@ -387,9 +387,40 @@ def create_router(store: Store) -> APIRouter:
 
     @router.get("/predictions")
     async def predictions(q: Optional[str] = None, limit: int = 30):
+        """Liste legacy (Offer) — préfère /predictions/markets pour le live."""
         from scrapers.predictions import PredictionsScraper
         offers = await asyncio.to_thread(lambda: PredictionsScraper().run(q)[:limit])
         return [o.to_dict() for o in offers]
+
+    @router.get("/predictions/markets")
+    async def predictions_markets(request: Request, q: Optional[str] = None, limit: int = 30):
+        """Marchés Polymarket live (Gamma), normalisés pour le paper trading."""
+        limited = await _rate_limit(request, max_requests=60, window=60.0)
+        if limited:
+            return limited
+        limit = max(1, min(int(limit or 30), 50))
+        from scrapers.predictions import PredictionsScraper
+        markets = await asyncio.to_thread(
+            lambda: PredictionsScraper().markets_as_dicts(limit=limit, query=q, include_clob_price=False)
+        )
+        return {"markets": markets, "count": len(markets), "source": "gamma-api.polymarket.com"}
+
+    @router.get("/predictions/market/{market_id}")
+    async def predictions_market_detail(market_id: str, request: Request):
+        """Détail marché + prix CLOB + historique + carnet (proxifié serveur)."""
+        limited = await _rate_limit(request, max_requests=60, window=60.0)
+        if limited:
+            return limited
+        from scrapers.polymarket_client import PolymarketClient
+        try:
+            PolymarketClient.validate_market_id(market_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, 400)
+        from scrapers.predictions import PredictionsScraper
+        detail = await asyncio.to_thread(lambda: PredictionsScraper().market_detail(market_id))
+        if not detail:
+            return JSONResponse({"error": "marché introuvable"}, 404)
+        return detail
 
     # --- Suivis (watches) ---
     @router.get("/watches")
@@ -638,13 +669,69 @@ def create_router(store: Store) -> APIRouter:
 
     # --- Marché de prédictions (Polymarket Paper Betting) ---
     @router.post("/predictions/bet")
-    async def place_prediction_bet(body: dict):
+    async def place_prediction_bet(request: Request, body: dict):
+        """Paper bet : cash virtuel local, prix sourcé depuis CLOB (pas le client)."""
+        limited = await _rate_limit(request, max_requests=30, window=60.0)
+        if limited:
+            return limited
         from bot.paper_trading import get_paper_store
-        market_slug = body.get("market_slug") or "poly-bet"
-        question = body.get("question") or "Marché de prédiction"
-        outcome = body.get("outcome") or "YES"
-        price = float(body.get("price") or 0.5)
-        amount = float(body.get("amount") or 10.0)
+        from scrapers.polymarket_client import get_polymarket_client
+
+        market_ref = (
+            (body.get("market_id") or body.get("market_slug") or body.get("slug") or "")
+            .strip()
+        )
+        outcome = (body.get("outcome") or "YES").strip().upper()
+        if outcome in ("OUI", "Y"):
+            outcome = "YES"
+        elif outcome in ("NON", "N"):
+            outcome = "NO"
+        try:
+            amount = float(body.get("amount") or 10.0)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "montant invalide"}, 400)
+        if amount <= 0 or amount > 1_000_000:
+            return JSONResponse({"error": "montant hors bornes"}, 400)
+
+        if not market_ref:
+            return JSONResponse({"error": "marché requis"}, 400)
+
+        client = get_polymarket_client()
+        question = (body.get("question") or "Marché de prédiction").strip()[:500]
+        market_slug = market_ref
+        price: Optional[float] = None
+        price_source = ""
+
+        try:
+            client.validate_market_id(market_ref)
+        except ValueError:
+            return JSONResponse({"error": "identifiant marché invalide"}, 400)
+
+        def _resolve():
+            raw = client.get_market(market_ref)
+            if not raw:
+                return None, None, None, None
+            norm = client.normalize_market(raw, include_clob_price=False)
+            px = client.quote_price_for_outcome(norm, outcome)
+            return norm, px, norm.get("slug") or market_ref, norm.get("question") or question
+
+        norm, clob_price, slug, qtitle = await asyncio.to_thread(_resolve)
+        if norm:
+            market_slug = slug or market_slug
+            question = qtitle or question
+        if clob_price is not None:
+            price = float(clob_price)
+            price_source = "clob"
+        elif norm and outcome == "YES" and norm.get("gamma_yes_price") is not None:
+            price = float(norm["gamma_yes_price"])
+            price_source = "gamma"
+        elif norm and outcome == "NO" and norm.get("gamma_no_price") is not None:
+            price = float(norm["gamma_no_price"])
+            price_source = "gamma"
+
+        if price is None:
+            return JSONResponse({"error": "cours serveur indisponible"}, 400)
+
         res = get_paper_store().buy_prediction(
             market_slug=market_slug,
             question=question,
@@ -654,6 +741,8 @@ def create_router(store: Store) -> APIRouter:
         )
         if "error" in res:
             return JSONResponse(res, 400)
+        res["price_source"] = price_source
+        res["market_slug"] = market_slug
         return res
 
     @router.get("/predictions/portfolio")

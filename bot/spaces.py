@@ -117,7 +117,7 @@ def load_space_items(slug: str, query: Optional[str] = None, limit: int = 24) ->
 
         elif slug == "predictions":
             from scrapers.predictions import PredictionsScraper
-            items = [_offer_dict(o) for o in PredictionsScraper().run(query)[:limit]]
+            items = PredictionsScraper().markets_as_dicts(limit=limit, query=query)[:limit]
 
         elif slug == "sante":
             from bot.medical_store import MedicalStore

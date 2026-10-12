@@ -65,9 +65,15 @@ class TestSpacesCatalog(unittest.TestCase):
 
     def test_load_predictions_mocked(self):
         from bot import spaces
-        from bot.models import Offer
-        fake = [Offer(title="Will X happen?", url="https://polymarket.com", source="polymarket", provider="Polymarket", offer_type="prediction", description="55%")]
-        with mock.patch("scrapers.predictions.PredictionsScraper.run", return_value=fake):
+        fake = [{
+            "title": "Will X happen?",
+            "url": "https://polymarket.com",
+            "source": "polymarket",
+            "provider": "Polymarket",
+            "offer_type": "prediction",
+            "description": "55%",
+        }]
+        with mock.patch("scrapers.predictions.PredictionsScraper.markets_as_dicts", return_value=fake):
             data = spaces.load_space_items("predictions")
             self.assertEqual(data["items"][0]["offer_type"], "prediction")
 
