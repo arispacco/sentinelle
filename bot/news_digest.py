@@ -183,3 +183,163 @@ def build_topic_record(cluster: dict) -> dict:
         "first_seen": datetime.now(timezone.utc).isoformat(),
         "category": infer_topic_category(articles),
     }
+
+
+def match_topic_id(store, title: str, limit: int = 80):
+    """Trouve un news_topic existant par similarité Jaccard titre (ou None)."""
+    tokens = normalize_tokens(title or "")
+    if not tokens:
+        return None
+    try:
+        topics = store.get_news_topics(limit=limit, offset=0)
+    except Exception:
+        return None
+    best_id = None
+    best_score = 0.0
+    for t in topics:
+        score = jaccard(tokens, normalize_tokens(t.get("title") or ""))
+        if score > best_score:
+            best_score = score
+            best_id = t.get("id")
+    if best_score >= JACCARD_CHAT_MATCH_THRESHOLD and best_id is not None:
+        return int(best_id)
+    return None
+
+
+def summarize_prompt(topic_title: str, sources: List[dict]) -> str:
+    numbered = "\n".join(
+        f"[{i}] ({s.get('source') or 'source'}) {s.get('title','')} — {(s.get('description') or '')[:220]}"
+        for i, s in enumerate(sources[:10], start=1)
+    )
+    return f"""Tu es un rédacteur d'actualités de Sentinelle. À partir des sources numérotées ci-dessous, rédige un article de synthèse original en français (style Perplexity).
+
+SUJET : {topic_title}
+
+SOURCES (seule vérité autorisée) :
+{numbered}
+
+Règles ABSOLUES :
+1. Utilise UNIQUEMENT les faits présents dans les sources. N'invente rien.
+2. Structure markdown : une phrase d'accroche directe (sans formule générique), puis 3 à 5 points clés en liste avec citations [n], puis une phrase de contexte.
+3. Ne cite pas les noms des médias dans le corps du texte ; garde les [n] pour les sources.
+4. Maximum 220 mots."""
+
+
+def fallback_summary(topic_title: str, sources: List[dict]) -> str:
+    lines = [f"{topic_title}", ""]
+    for i, s in enumerate(sources[:8], start=1):
+        desc = " ".join((s.get("description") or "").split())[:160]
+        line = f"- **[{i}] {s.get('title','')}**"
+        if desc:
+            line += f" : {desc}"
+        lines.append(line)
+    lines.append("")
+    lines.append("Synthèse générée à partir des sources listées ci-dessous.")
+    return "\n".join(lines)
+
+
+def collect_news_articles() -> List[dict]:
+    """Collecte brute multi-catégories (une passe sur les flux d'actualité)."""
+    from scrapers.news import NewsScraper
+
+    scraper = NewsScraper()
+    articles: List[dict] = []
+    seen_urls = set()
+    for offer in scraper.run():
+        url = str(getattr(offer, "url", "") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        articles.append({
+            "title": getattr(offer, "title", ""),
+            "url": url,
+            "source": getattr(offer, "provider", "") or "",
+            "scrape_source": getattr(offer, "source", "") or "",
+            "image": getattr(offer, "image_url", "") or "",
+            "description": getattr(offer, "description", "") or "",
+            "keywords_matched": list(getattr(offer, "keywords_matched", None) or []),
+        })
+    return articles
+
+
+def run_news_cycle(store=None) -> dict:
+    """Un cycle complet : collect → cluster → nouveaux sujets → synthèses.
+
+    Plafond MAX_TOPICS_PER_CYCLE synthèses par cycle (tous statuts confondus) ;
+    les sujets non synthétisés restent `pending` et sont traités en priorité au
+    cycle suivant. Ne lève JAMAIS d'exception (log seulement).
+    """
+    if store is None:
+        from bot.store import Store
+        store = Store()
+
+    stats = {"collected": 0, "new_topics": 0, "summarized": 0, "pending": 0}
+    try:
+        articles = collect_news_articles()
+        stats["collected"] = len(articles)
+        if not articles:
+            return stats
+
+        # 1. Traiter d'abord la file des sujets en attente de synthèse
+        pending_budget = MAX_TOPICS_PER_CYCLE
+        try:
+            for topic in store.get_pending_summary_topics(limit=pending_budget):
+                _generate_and_store_summary(store, topic)
+                stats["summarized"] += 1
+                pending_budget -= 1
+                if pending_budget <= 0:
+                    break
+        except Exception as e:
+            log.warning("[news_digest] file pending : %s", e)
+
+        # 2. Clusters et nouveaux sujets
+        clusters = cluster_topics(articles)
+        for cluster in clusters:
+            rec = build_topic_record(cluster)
+            try:
+                is_new = store.upsert_news_topic(rec)
+            except Exception as e:
+                log.warning("[news_digest] upsert sujet : %s", e)
+                continue
+            if is_new:
+                stats["new_topics"] += 1
+
+        # 3. Synthèse des nouveaux (plafonnée), les autres restent pending
+        if pending_budget > 0:
+            try:
+                for topic in store.get_pending_summary_topics(limit=pending_budget):
+                    _generate_and_store_summary(store, topic)
+                    stats["summarized"] += 1
+                    pending_budget -= 1
+                    if pending_budget <= 0:
+                        break
+            except Exception as e:
+                log.warning("[news_digest] synthèse nouveaux : %s", e)
+
+        try:
+            stats["pending"] = store.count_pending_summary_topics()
+        except Exception:
+            pass
+    except Exception as e:
+        log.exception("[news_digest] cycle en échec : %s", e)
+    return stats
+
+
+def _generate_and_store_summary(store, topic: dict) -> None:
+    """Génère la synthèse d'un sujet et la persiste ; retry au cycle suivant si échec."""
+    from bot.ai import get_gemini_key, call_llm
+
+    sources = topic.get("sources") or []
+    title = topic.get("title") or ""
+    summary = None
+    try:
+        if get_gemini_key():
+            summary = call_llm(summarize_prompt(title, sources))
+    except Exception as e:
+        log.warning("[news_digest] LLM indisponible pour « %s » : %s", title[:60], e)
+    if not summary:
+        summary = fallback_summary(title, sources)
+        status = "pending_summary" if not get_gemini_key() else "ready"
+    else:
+        status = "ready"
+    store.update_news_topic_summary(topic["id"], summary, status)
