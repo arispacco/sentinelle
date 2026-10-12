@@ -136,6 +136,32 @@ async def periodic_scraping_task(store: Store):
         await asyncio.sleep(1800)
 
 
+_news_cycle_lock = asyncio.Lock()
+
+
+async def news_scheduler(store: Store):
+    """Cycle de synthèse toutes les 15 minutes, sans chevaucher le précédent."""
+    from bot.news_digest import run_news_cycle
+
+    await asyncio.sleep(20)
+    while True:
+        if _news_cycle_lock.locked():
+            log.info("[news_scheduler] cycle précédent toujours en cours — sauté")
+        else:
+            async with _news_cycle_lock:
+                try:
+                    stats = await asyncio.to_thread(run_news_cycle, store)
+                    log.info(
+                        "[news_scheduler] cycle OK : %d articles, %d nouveaux sujets, "
+                        "%d synthèses, %d en attente",
+                        stats.get("collected", 0), stats.get("new_topics", 0),
+                        stats.get("summarized", 0), stats.get("pending", 0),
+                    )
+                except Exception as e:
+                    log.exception("[news_scheduler] échec du cycle : %s", e)
+        await asyncio.sleep(900)
+
+
 def background_scraping_enabled() -> bool:
     """La veille réseau reste active, sauf si SENTINELLE_DISABLE_SCHEDULER vaut 1."""
     flag = os.getenv("SENTINELLE_DISABLE_SCHEDULER", "").strip().lower()
@@ -149,13 +175,14 @@ def create_app(store: Store = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         mode = "PRODUCTION" if is_prod else "DEVELOPMENT"
         log.info("Sentinelle v3.0 démarré en mode %s", mode)
-        task = None
+        tasks = []
         if background_scraping_enabled():
-            task = asyncio.create_task(periodic_scraping_task(app.state.store))
+            tasks.append(asyncio.create_task(periodic_scraping_task(app.state.store)))
+            tasks.append(asyncio.create_task(news_scheduler(app.state.store)))
         else:
             log.info("Veille de fond désactivée (SENTINELLE_DISABLE_SCHEDULER)")
         yield
-        if task is not None:
+        for task in tasks:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task

@@ -43,12 +43,17 @@ class TestScheduler(unittest.TestCase):
         async def fake_periodic(_store):
             started["yes"] = True
 
+        async def fake_news(_store):
+            started["news"] = True
+
         app = create_app(store=self.store)
-        with mock.patch("web.server.periodic_scraping_task", fake_periodic):
+        with mock.patch("web.server.periodic_scraping_task", fake_periodic), \
+             mock.patch("web.server.news_scheduler", fake_news):
             with TestClient(app) as client:
                 response = client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(started.get("yes"))
+        self.assertTrue(started.get("news"))
 
 
 if __name__ == "__main__":
