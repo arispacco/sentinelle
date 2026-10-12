@@ -83,6 +83,23 @@ CREATE TABLE IF NOT EXISTS alert_notifications (
 CREATE INDEX IF NOT EXISTS idx_alert_notif_alert ON alert_notifications(alert_id);
 """
 
+NEWS_TOPICS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS news_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT NOT NULL UNIQUE,
+    title TEXT,
+    summary_md TEXT,
+    summary_status TEXT DEFAULT 'pending',
+    sources_json TEXT DEFAULT '[]',
+    image TEXT DEFAULT '',
+    first_seen TEXT,
+    last_seen TEXT,
+    source_count INTEGER DEFAULT 0,
+    category TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_topics_first_seen ON news_topics(first_seen DESC);
+"""
+
 POSTGRES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS offers (
     id VARCHAR(100) PRIMARY KEY,
@@ -98,6 +115,21 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE INDEX IF NOT EXISTS idx_pg_offers_dna ON offers(dna_hash);
 CREATE INDEX IF NOT EXISTS idx_pg_offers_status ON offers(status);
 CREATE INDEX IF NOT EXISTS idx_pg_offers_tier ON offers(credibility_tier);
+
+CREATE TABLE IF NOT EXISTS news_topics (
+    id SERIAL PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    title TEXT,
+    summary_md TEXT,
+    summary_status TEXT DEFAULT 'pending',
+    sources_json TEXT DEFAULT '[]',
+    image TEXT DEFAULT '',
+    first_seen TEXT,
+    last_seen TEXT,
+    source_count INTEGER DEFAULT 0,
+    category TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pg_news_topics_first_seen ON news_topics(first_seen DESC);
 
 CREATE TABLE IF NOT EXISTS comments (
     id SERIAL PRIMARY KEY,
@@ -175,6 +207,7 @@ class Store:
                 except sqlite3.OperationalError:
                     pass
                 self.conn.executescript(SQLITE_SCHEMA)
+                self.conn.executescript(NEWS_TOPICS_SCHEMA)
                 self.conn.commit()
                 self._migrate()
             except sqlite3.OperationalError as e:
@@ -188,6 +221,7 @@ class Store:
                 self.conn.row_factory = sqlite3.Row
                 self.conn.execute("PRAGMA busy_timeout=10000;")
                 self.conn.executescript(SQLITE_SCHEMA)
+                self.conn.executescript(NEWS_TOPICS_SCHEMA)
                 self.conn.commit()
                 self._migrate()
 
