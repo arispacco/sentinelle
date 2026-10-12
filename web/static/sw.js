@@ -1,14 +1,45 @@
-const CACHE = "sentinelle-hub-v3";
+// Sentinelle — Service Worker
+// Stratégie :
+//  - Assets statiques (/, /static/*, manifest) : network-first, cache SEULEMENT si r.ok && type basic/cors.
+//  - Fallback hors-ligne : caches.match(..., { ignoreSearch: true }) → tolère le mismatch "?v=N".
+//  - API : réseau uniquement, réponse JSON offline en cas d'échec (jamais mise en cache).
+const CACHE = "sentinelle-hub-v7";
+
+// Pré-cache des URL versionnées EXACTES servies par index.html (+ fallbacks sans query).
 const SHELL = [
   "/",
+  "/static/app.css?v=7",
+  "/static/app.js?v=10",
   "/static/app.css",
   "/static/app.js",
   "/static/icons/icon.svg",
   "/manifest.webmanifest",
 ];
 
+function isCacheable(response) {
+  try {
+    return !!response && response.ok && (response.type === "basic" || response.type === "cors");
+  } catch (_) {
+    return false;
+  }
+}
+
+async function precache() {
+  const cache = await caches.open(CACHE);
+  await Promise.allSettled(
+    SHELL.map(async (url) => {
+      try {
+        const res = await fetch(new Request(url, { cache: "reload" }));
+        if (isCacheable(res)) await cache.put(url, res);
+      } catch (_) {
+        /* asset indisponible au moment de l'install : le runtime le remplira */
+      }
+    })
+  );
+}
+
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
+  e.waitUntil(precache());
   self.skipWaiting();
 });
 
@@ -21,36 +52,61 @@ self.addEventListener("activate", (e) => {
   self.clients.claim();
 });
 
+// Network-first avec garde-fou : on ne met en cache QUE les réponses valides,
+// et on retombe sur le cache (ignoreSearch) si le réseau renvoie une erreur serveur.
+async function networkFirstAsset(req) {
+  try {
+    const fresh = await fetch(req);
+    if (isCacheable(fresh)) {
+      const cache = await caches.open(CACHE);
+      cache.put(req, fresh.clone()).catch(() => {});
+      return fresh;
+    }
+    // 5xx / opaque / erreur : ne JAMAIS empoisonner le cache avec ça.
+    const cached = await caches.match(req, { ignoreSearch: true });
+    return cached || fresh;
+  } catch (_) {
+    const cached = await caches.match(req, { ignoreSearch: true });
+    if (cached) return cached;
+    return new Response("Offline", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+}
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
-  const url = new URL(req.url);
-  // Toujours réseau d'abord pour JS/HTML/API marché (évite shell obsolète)
-  const networkFirst =
-    url.pathname === "/" ||
-    url.pathname.endsWith(".js") ||
-    url.pathname.endsWith(".css") ||
-    url.pathname.startsWith("/api/");
 
-  if (networkFirst) {
-    e.respondWith(
-      fetch(req)
-        .then((r) => {
-          if (url.pathname === "/" || url.pathname.startsWith("/static/")) {
-            const copy = r.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return r;
-        })
-        .catch(() => caches.match(req).then((c) => c || new Response("Offline", { status: 503 })))
-    );
+  let url;
+  try {
+    url = new URL(req.url);
+  } catch (_) {
+    return;
+  }
+  // Laisser passer le cross-origin (CDN charts, fonts Google…) : pas notre responsabilité.
+  if (url.origin !== self.location.origin) return;
+
+  const isStaticAsset =
+    url.pathname === "/" ||
+    url.pathname.startsWith("/static/") ||
+    url.pathname === "/manifest.webmanifest";
+
+  if (isStaticAsset) {
+    e.respondWith(networkFirstAsset(req));
     return;
   }
 
+  // API & autres : réseau d'abord, jamais de cache, fallback JSON offline propre.
   e.respondWith(
-    fetch(req)
-      .then((r) => r)
-      .catch(() => caches.match(req).then((c) => c || new Response("Offline", { status: 503 })))
+    fetch(req).catch(
+      () =>
+        new Response(JSON.stringify({ error: "offline" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+    )
   );
 });
 
@@ -90,4 +146,3 @@ self.addEventListener("notificationclick", (event) => {
     })
   );
 });
-
