@@ -533,20 +533,31 @@ async function loadSpace(slug, q = "") {
           
           let predictionActions = "";
           if (isPrediction) {
-            const matchProb = (it.description || "").match(/(\d+(\.\d+)?)%\s*Oui/i) || (it.description || "").match(/(\d+(\.\d+)?)%\s*Yes/i);
-            const yesProb = matchProb ? parseFloat(matchProb[1]) : 50;
-            const yesPrice = (yesProb / 100).toFixed(2);
-            const noPrice = ((100 - yesProb) / 100).toFixed(2);
+            let yesPrice = Number(it.yes_price);
+            let noPrice = Number(it.no_price);
+            if (!Number.isFinite(yesPrice) || yesPrice <= 0) {
+              const matchProb = (it.description || "").match(/(\d+(\.\d+)?)%\s*Oui/i) || (it.description || "").match(/(\d+(\.\d+)?)%\s*Yes/i);
+              const yesProb = matchProb ? parseFloat(matchProb[1]) : 50;
+              yesPrice = yesProb / 100;
+            }
+            if (!Number.isFinite(noPrice) || noPrice <= 0) {
+              noPrice = Math.max(0.01, 1 - yesPrice);
+            }
+            yesPrice = Math.min(0.99, Math.max(0.01, yesPrice));
+            noPrice = Math.min(0.99, Math.max(0.01, noPrice));
+            const yesCents = Math.round(yesPrice * 100);
+            const noCents = Math.round(noPrice * 100);
+            const mid = esc(it.id || it.slug || "");
             predictionActions = `
-              <div class="poly-actions" onclick="event.stopPropagation();">
-                <button class="btn-bet-yes" type="button" onclick="openBetModal('${payload}', 'YES', ${yesPrice})">🟢 Acheter OUI (${Math.round(yesProb)}¢)</button>
-                <button class="btn-bet-no" type="button" onclick="openBetModal('${payload}', 'NO', ${noPrice})">🔴 Acheter NON (${Math.round(100 - yesProb)}¢)</button>
+              <div class="poly-actions" data-stop>
+                <button class="btn-bet-yes" type="button" data-side="YES" data-price="${yesPrice.toFixed(4)}" data-market-id="${mid}">🟢 Acheter OUI (${yesCents}¢)</button>
+                <button class="btn-bet-no" type="button" data-side="NO" data-price="${noPrice.toFixed(4)}" data-market-id="${mid}">🔴 Acheter NON (${noCents}¢)</button>
               </div>
             `;
           }
 
           return `<article class="discover-card" data-payload="${payload}">
-            <img class="discover-card-img" src="${esc(img)}" alt="${title}" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=700&auto=format&fit=crop&q=80'">
+            <img class="discover-card-img" src="${esc(img)}" alt="${title}" loading="lazy" data-fallback-img>
             <div class="discover-card-body">
               <div>
                 <div class="meta">
@@ -565,16 +576,38 @@ async function loadSpace(slug, q = "") {
         })
         .join("") || '<p class="muted">Aucun élément pour le moment.</p>';
 
-    grid.querySelectorAll(".discover-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        const it = JSON.parse(decodeURIComponent(card.dataset.payload));
+    // Délégation d'événements attachée UNE SEULE fois par grille.
+    if (!grid.dataset.wired) {
+      grid.dataset.wired = "1";
+      // Fallback image cassée → visuel générique (sans onerror inline)
+      grid.addEventListener("error", (ev) => {
+        const img = ev.target.closest("img[data-fallback-img]");
+        if (img) img.src = "https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=700&auto=format&fit=crop&q=80";
+      }, true);
+      grid.addEventListener("click", (ev) => {
+        const betBtn = ev.target.closest("[data-side]");
+        if (betBtn) {
+          ev.stopPropagation();
+          const card = betBtn.closest("[data-payload]");
+          if (!card) return;
+          openBetModal(card.dataset.payload, betBtn.dataset.side, parseFloat(betBtn.dataset.price));
+          return;
+        }
+        const card = ev.target.closest("[data-payload]");
+        if (!card || !grid.contains(card)) return;
+        let it;
+        try {
+          it = JSON.parse(decodeURIComponent(card.dataset.payload));
+        } catch (_) {
+          return;
+        }
         if (it.offer_type === "medical" || it.source === "clinicaltrials" || it.source === "pubmed") {
           openMedicalModal(encodeURIComponent(JSON.stringify(it)));
           return;
         }
-        if (it.url) window.open(it.url, "_blank", "noopener");
+        openExternal(it.url);   // no-op si url vide/# → plus jamais de duplicata de l'accueil
       });
-    });
+    }
   } catch (e) {
     grid.innerHTML = '<p class="muted">Erreur de chargement de l\'espace.</p>';
   }
