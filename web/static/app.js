@@ -1901,20 +1901,78 @@ let currentBetPayload = null;
 let currentBetOutcome = "YES";
 let currentBetPrice = 0.50;
 
-function openBetModal(payloadStr, outcome, price) {
+function renderPolyOrderBook(book) {
+  const wrap = $("#betOrderBook");
+  const bidsEl = $("#betBids");
+  const asksEl = $("#betAsks");
+  if (!wrap || !bidsEl || !asksEl) return;
+  const bids = (book && book.bids) || [];
+  const asks = (book && book.asks) || [];
+  if (!bids.length && !asks.length) {
+    wrap.style.display = "none";
+    return;
+  }
+  wrap.style.display = "block";
+  bidsEl.innerHTML = bids.slice(0, 5).map((lvl) => {
+    const p = Number(lvl.price);
+    const s = Number(lvl.size);
+    return `<div style="display:flex;justify-content:space-between;padding:2px 4px;background:rgba(16,185,129,0.06);border-radius:4px;"><span style="color:#10B981;font-weight:600;">${esc((p * 100).toFixed(1))}¢</span><span class="muted">${esc(Number.isFinite(s) ? s.toFixed(0) : "—")}</span></div>`;
+  }).join("");
+  asksEl.innerHTML = asks.slice(0, 5).map((lvl) => {
+    const p = Number(lvl.price);
+    const s = Number(lvl.size);
+    return `<div style="display:flex;justify-content:space-between;padding:2px 4px;background:rgba(239,68,68,0.06);border-radius:4px;"><span style="color:#EF4444;font-weight:600;">${esc((p * 100).toFixed(1))}¢</span><span class="muted">${esc(Number.isFinite(s) ? s.toFixed(0) : "—")}</span></div>`;
+  }).join("");
+}
+
+async function openBetModal(payloadStr, outcome, price) {
   try {
     const item = JSON.parse(decodeURIComponent(payloadStr));
     currentBetPayload = item;
     currentBetOutcome = outcome;
     currentBetPrice = price;
-    
-    $("#betQuestion").textContent = item.title;
+
+    $("#betQuestion").textContent = item.title || item.question || "Marché";
     $("#betOutcomeBadge").textContent = outcome === "YES" ? "🟢 OUI (YES)" : "🔴 NON (NO)";
     $("#betOutcomeBadge").style.color = outcome === "YES" ? "#10B981" : "#EF4444";
-    $("#betPriceDisplay").textContent = `${Math.round(price * 100)}¢ (${price} USD)`;
+    $("#betPriceDisplay").textContent = `${Math.round(price * 100)}¢ (${Number(price).toFixed(4)} USD)`;
+    const srcEl = $("#betPriceSource");
+    if (srcEl) srcEl.textContent = "Actualisation du prix CLOB…";
     $("#betMsg").textContent = "";
+    renderPolyOrderBook(null);
     updateBetPayout();
     $("#betModal").classList.remove("hidden");
+
+    const marketRef = item.id || item.slug || "";
+    if (!marketRef) {
+      if (srcEl) srcEl.textContent = "Pari impossible : ce marché n'a pas d'identifiant serveur.";
+      return;
+    }
+    try {
+      const detail = await api(`/api/predictions/market/${encodeURIComponent(marketRef)}`);
+      if (detail && !detail.error) {
+        currentBetPayload = { ...item, ...detail };
+        const live =
+          outcome === "YES"
+            ? (detail.clob_yes_price ?? detail.yes_price)
+            : (detail.clob_no_price ?? detail.no_price);
+        if (Number.isFinite(Number(live)) && Number(live) > 0) {
+          currentBetPrice = Number(live);
+          $("#betPriceDisplay").textContent = `${Math.round(currentBetPrice * 100)}¢ (${currentBetPrice.toFixed(4)} USD)`;
+          if (srcEl) srcEl.textContent = detail.clob_yes_price != null || detail.clob_no_price != null
+            ? "Prix mid CLOB (serveur)."
+            : "Prix Gamma (fallback serveur).";
+        } else if (srcEl) {
+          srcEl.textContent = "Prix liste — CLOB indisponible.";
+        }
+        renderPolyOrderBook(detail.order_book);
+        updateBetPayout();
+      } else if (srcEl) {
+        srcEl.textContent = "Prix liste — détail marché indisponible.";
+      }
+    } catch (_) {
+      if (srcEl) srcEl.textContent = "Prix liste — erreur réseau détail.";
+    }
   } catch (e) {
     console.error("Error opening bet modal:", e);
   }
@@ -1931,14 +1989,15 @@ async function submitBet() {
   if (!currentBetPayload) return;
   const amount = Number($("#betAmount").value);
   if (amount <= 0) return;
-  
-  $("#betMsg").textContent = "Envoi de la prise de position...";
+
+  $("#betMsg").textContent = "Envoi de la prise de position…";
   try {
     const res = await api("/api/predictions/bet", {
       method: "POST",
       body: JSON.stringify({
-        market_slug: currentBetPayload.url || currentBetPayload.title,
-        question: currentBetPayload.title,
+        market_id: currentBetPayload.id || "",
+        market_slug: currentBetPayload.slug || currentBetPayload.url || "",
+        question: currentBetPayload.title || currentBetPayload.question || "",
         outcome: currentBetOutcome,
         price: currentBetPrice,
         amount: amount,
@@ -1948,7 +2007,8 @@ async function submitBet() {
       $("#betMsg").textContent = `⚠️ ${res.error}`;
       return;
     }
-    $("#betMsg").textContent = `✅ Pari validé ! ${res.shares} parts achetées.`;
+    const src = res.price_source ? ` · source ${res.price_source}` : "";
+    $("#betMsg").textContent = `✅ Pari validé ! ${res.shares} parts @ ${Number(res.buy_price).toFixed(4)}${src}`;
     setTimeout(() => {
       $("#betModal").classList.add("hidden");
       loadLearn();
@@ -2107,8 +2167,8 @@ function paintLearn(p) {
   const totalTrades = acc.trades_count || fills.length || 0;
 
   $("#learnKpis").innerHTML = [
-    kpi(p.cash != null ? `$${p.cash.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}` : "—", "Cash Virtuel"),
-    kpi(p.equity != null ? `$${p.equity.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}` : "—", "Valeur Totale (Equity)"),
+    kpi(p.cash != null ? fmtUsd(p.cash) : "—", "Cash Virtuel"),
+    kpi(p.equity != null ? fmtUsd(p.equity) : "—", "Valeur Totale (Equity)"),
     kpi(positions.length, "Positions Ouvertes"),
     kpi(predictions.length, "Paris Prédictions"),
     kpi(totalTrades, "Exécutions (Trades)"),
@@ -2128,11 +2188,16 @@ function paintLearn(p) {
               <td>$${esc(Number(x.avg_price).toFixed(2))}</td>
               <td>$${esc(x.last_price != null ? Number(x.last_price).toFixed(2) : "—")}</td>
               <td style="color:${pnlColor};font-weight:700;">${pnlVal >= 0 ? "+" : ""}$${pnlVal.toFixed(2)}</td>
-              <td><button type="button" class="btn" style="padding:4px 8px;font-size:0.75rem;" onclick="closePosition('${esc(x.symbol)}')">Fermer ✕</button></td>
+              <td><button type="button" class="btn" data-close-symbol="${esc(x.symbol)}" style="padding:4px 8px;font-size:0.75rem;">Fermer ✕</button></td>
             </tr>`;
           }
         )
         .join("") || `<tr><td colspan="6" class="muted" style="text-align:center;">Aucune position active. Passez un premier ordre ci-dessus !</td></tr>`;
+    tbody.onclick = (ev) => {
+      const btn = ev.target.closest("[data-close-symbol]");
+      if (!btn) return;
+      closePosition(btn.dataset.closeSymbol);
+    };
   }
 
   const predTbody = $("#learnPredTable tbody");
@@ -2168,7 +2233,8 @@ function paintLearn(p) {
   }
 }
 
-async function placeLearnOrder() {
+async function placeLearnOrder(e) {
+  e?.preventDefault();
   const body = {
     symbol: $("#learnSymbol").value.trim(),
     side: $("#learnSide").value,
@@ -2225,17 +2291,17 @@ function askLearnPrompt(txt) {
 function wireTradingEvents() {
   $("#tabModeBeginner")?.addEventListener("click", () => switchTradeMode("beginner"));
   $("#tabModePro")?.addEventListener("click", () => switchTradeMode("pro"));
-  $("#btnLearnReset")?.addEventListener("click", resetLearn);
   $("#btnLearnChartRefresh")?.addEventListener("click", loadLearnChart);
   $("#betClose")?.addEventListener("click", () => $("#betModal")?.classList.add("hidden"));
+  $("#betForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitBet();
+  });
+  $("#betAmount")?.addEventListener("input", updateBetPayout);
   $("#learnAskForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
     askLearn();
   });
 }
-
-document.addEventListener("DOMContentLoaded", () => {
-  wireTradingEvents();
-});
 
 document.addEventListener("DOMContentLoaded", init);
