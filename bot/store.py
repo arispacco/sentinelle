@@ -166,16 +166,30 @@ class Store:
         if not self.use_pg:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            self.conn = sqlite3.connect(str(p), check_same_thread=False, isolation_level=None)
-            self.conn.row_factory = sqlite3.Row
-            self.conn.execute("PRAGMA busy_timeout=10000;")
             try:
-                self.conn.execute("PRAGMA journal_mode=WAL;")
-            except sqlite3.OperationalError:
-                pass
-            self.conn.executescript(SQLITE_SCHEMA)
-            self.conn.commit()
-            self._migrate()
+                self.conn = sqlite3.connect(str(p), check_same_thread=False, isolation_level=None)
+                self.conn.row_factory = sqlite3.Row
+                self.conn.execute("PRAGMA busy_timeout=10000;")
+                try:
+                    self.conn.execute("PRAGMA journal_mode=WAL;")
+                except sqlite3.OperationalError:
+                    pass
+                self.conn.executescript(SQLITE_SCHEMA)
+                self.conn.commit()
+                self._migrate()
+            except sqlite3.OperationalError as e:
+                log.error("[store] SQLite %s indisponible (%s) — fallback", p, e)
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                fb = p.with_name(p.stem + ".fallback.db")
+                self.conn = sqlite3.connect(str(fb), check_same_thread=False, isolation_level=None)
+                self.conn.row_factory = sqlite3.Row
+                self.conn.execute("PRAGMA busy_timeout=10000;")
+                self.conn.executescript(SQLITE_SCHEMA)
+                self.conn.commit()
+                self._migrate()
 
     def _migrate(self):
         """Migrations incrémentales pour SQLite."""
